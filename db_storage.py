@@ -1,6 +1,7 @@
 import os
 from decimal import Decimal
 from typing import Optional, Dict, Any
+from urllib.parse import quote_plus
 
 import asyncpg
 
@@ -11,12 +12,48 @@ class DatabaseManager:
     """PostgreSQL storage for payouts, webhook idempotency and runtime snapshots."""
 
     def __init__(self, dsn: Optional[str] = None):
-        self.dsn = dsn or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
+        self.dsn = dsn or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN") or self._build_dsn_from_parts()
         self.pool: Optional[asyncpg.Pool] = None
+
+    def _build_dsn_from_parts(self) -> Optional[str]:
+        """
+        Собирает DSN из отдельных переменных окружения:
+        POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
+        """
+        host = os.getenv("POSTGRES_HOST")
+        if not host:
+            return None
+
+        port = os.getenv("POSTGRES_PORT", "5432")
+        user = os.getenv("POSTGRES_USER")
+        password = os.getenv("POSTGRES_PASSWORD")
+        database = os.getenv("POSTGRES_DB")
+        sslmode = os.getenv("POSTGRES_SSLMODE", "disable")
+
+        missing = [
+            key for key, value in {
+                "POSTGRES_USER": user,
+                "POSTGRES_PASSWORD": password,
+                "POSTGRES_DB": database,
+            }.items() if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                "Для подключения к PostgreSQL не заданы переменные: "
+                + ", ".join(missing)
+            )
+
+        user_q = quote_plus(user)
+        password_q = quote_plus(password)
+        db_q = quote_plus(database)
+        return f"postgresql://{user_q}:{password_q}@{host}:{port}/{db_q}?sslmode={sslmode}"
 
     async def connect(self):
         if not self.dsn:
-            raise RuntimeError("DATABASE_URL (или POSTGRES_DSN) не задан для PostgreSQL.")
+            raise RuntimeError(
+                "Не задан PostgreSQL DSN. Используйте DATABASE_URL/POSTGRES_DSN "
+                "или набор POSTGRES_HOST/POSTGRES_PORT/POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB."
+            )
 
         self.pool = await asyncpg.create_pool(
             dsn=self.dsn,
