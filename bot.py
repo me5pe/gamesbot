@@ -198,8 +198,14 @@ class DiceBot:
                     await self._bot_send_message_with_retry(
                         context.bot,
                         game.chat_id,
-                        f"ℹ️ @{game.challenger.username} оплатил (webhook).",
+                        f"ℹ️ @{game.challenger.username} оплатил.",
                         parse_mode=ParseMode.HTML,
+                    )
+                    await self._edit_private_payment_message(
+                        context.bot,
+                        game.challenger.id,
+                        getattr(game, "challenger_invoice_message_id", None),
+                        "✅ <b>Счёт успешно оплачен</b>",
                     )
                 if game.target_payment_id and str(game.target_payment_id) == invoice_id_str and not game.target_paid:
                     game.target_paid = True
@@ -207,10 +213,23 @@ class DiceBot:
                     await self._bot_send_message_with_retry(
                         context.bot,
                         game.chat_id,
-                        f"ℹ️ @{game.target_username} оплатил (webhook).",
+                        f"ℹ️ @{game.target_username} оплатил.",
                         parse_mode=ParseMode.HTML,
                     )
+                    if game.target_user:
+                        await self._edit_private_payment_message(
+                            context.bot,
+                            game.target_user.id,
+                            getattr(game, "target_invoice_message_id", None),
+                            "✅ <b>Счёт успешно оплачен</b>",
+                        )
                 if changed and game.challenger_paid and game.target_paid and game.status == "payment_pending":
+                    await self._update_duel_invoice_messages_status(
+                        context.bot,
+                        game,
+                        "✅ <b>Счёт успешно оплачен</b>",
+                        "✅ <b>Счёт успешно оплачен</b>",
+                    )
                     await self._start_duel_game(context, game)
                 if changed:
                     await self._persist_runtime_state()
@@ -227,8 +246,14 @@ class DiceBot:
                     await self._bot_send_message_with_retry(
                         context.bot,
                         game.chat_id,
-                        f"ℹ️ @{game.challenger.username} оплатил участие в Blackjack (webhook).",
+                        f"ℹ️ @{game.challenger.username} оплатил участие в Blackjack.",
                         parse_mode=ParseMode.HTML,
+                    )
+                    await self._edit_private_payment_message(
+                        context.bot,
+                        game.challenger.id,
+                        getattr(game, "challenger_invoice_message_id", None),
+                        "✅ <b>Счёт успешно оплачен</b>",
                     )
                 if game.target_payment_id and str(game.target_payment_id) == invoice_id_str and not game.target_paid:
                     game.target_paid = True
@@ -236,10 +261,23 @@ class DiceBot:
                     await self._bot_send_message_with_retry(
                         context.bot,
                         game.chat_id,
-                        f"ℹ️ @{game.target_username} оплатил участие в Blackjack (webhook).",
+                        f"ℹ️ @{game.target_username} оплатил участие в Blackjack.",
                         parse_mode=ParseMode.HTML,
                     )
+                    if game.target_user:
+                        await self._edit_private_payment_message(
+                            context.bot,
+                            game.target_user.id,
+                            getattr(game, "target_invoice_message_id", None),
+                            "✅ <b>Счёт успешно оплачен</b>",
+                        )
                 if changed and game.challenger_paid and game.target_paid and game.status == "payment_pending":
+                    await self._update_duel_invoice_messages_status(
+                        context.bot,
+                        game,
+                        "✅ <b>Счёт успешно оплачен</b>",
+                        "✅ <b>Счёт успешно оплачен</b>",
+                    )
                     await self.start_blackjack_game(context, game)
                 if changed:
                     await self._persist_runtime_state()
@@ -256,8 +294,14 @@ class DiceBot:
                     await self._bot_send_message_with_retry(
                         context.bot,
                         game.chat_id,
-                        f"ℹ️ @{game.challenger.username} оплатил участие в КНБ (webhook).",
+                        f"ℹ️ @{game.challenger.username} оплатил участие в КНБ.",
                         parse_mode=ParseMode.HTML,
+                    )
+                    await self._edit_private_payment_message(
+                        context.bot,
+                        game.challenger.id,
+                        getattr(game, "challenger_invoice_message_id", None),
+                        "✅ <b>Счёт успешно оплачен</b>",
                     )
                 if game.target_payment_id and str(game.target_payment_id) == invoice_id_str and not game.target_paid:
                     game.target_paid = True
@@ -265,10 +309,23 @@ class DiceBot:
                     await self._bot_send_message_with_retry(
                         context.bot,
                         game.chat_id,
-                        f"ℹ️ @{game.target_username} оплатил участие в КНБ (webhook).",
+                        f"ℹ️ @{game.target_username} оплатил участие в КНБ.",
                         parse_mode=ParseMode.HTML,
                     )
+                    if game.target_user:
+                        await self._edit_private_payment_message(
+                            context.bot,
+                            game.target_user.id,
+                            getattr(game, "target_invoice_message_id", None),
+                            "✅ <b>Счёт успешно оплачен</b>",
+                        )
                 if changed and game.challenger_paid and game.target_paid and game.status == "payment_pending":
+                    await self._update_duel_invoice_messages_status(
+                        context.bot,
+                        game,
+                        "✅ <b>Счёт успешно оплачен</b>",
+                        "✅ <b>Счёт успешно оплачен</b>",
+                    )
                     game.status = "playing"
                     game.initialize_players()
                     await self._bot_send_message_with_retry(
@@ -298,10 +355,24 @@ class DiceBot:
                         await self._bot_send_message_with_retry(
                             context.bot,
                             game.chat_id,
-                            f"ℹ️ @{player.username} оплатил (webhook).",
+                            f"ℹ️ @{player.username} оплатил.",
                             parse_mode=ParseMode.HTML,
                         )
+                        await self._edit_private_payment_message(
+                            context.bot,
+                            player.id,
+                            (getattr(game, "players_invoice_message_ids", {}) or {}).get(player.id),
+                            "✅ <b>Счёт успешно оплачен</b>",
+                        )
                         if game.all_paid() and game.status == "payment_pending":
+                            await self._update_multi_invoice_messages_status(
+                                context.bot,
+                                game,
+                                {
+                                    p.id: "✅ <b>Счёт успешно оплачен</b>"
+                                    for p in game.players
+                                },
+                            )
                             await self._start_multi_game(context, game)
                         await self._persist_runtime_state()
                         return
@@ -450,10 +521,11 @@ class DiceBot:
         return payout.get("check_link")
 
     async def _mark_payout_notified_completed(self, game_id: str):
-        """Lifecycle continuation: check_created -> notified -> completed."""
+        """Lifecycle continuation: check_created -> notified -> completed -> cleanup."""
         try:
             await self.db.set_payout_status(game_id, "notified")
             await self.db.set_payout_status(game_id, "completed")
+            await self.db.delete_payout(game_id)
         except Exception as e:
             logger.error("Ошибка обновления статуса payout %s: %s", game_id, e)
 
@@ -728,6 +800,86 @@ class DiceBot:
                 return
 
         logger.warning("Не удалось обновить сообщение после %s попыток", max_retries)
+
+    async def _edit_private_payment_message(
+        self,
+        bot,
+        user_id: Optional[int],
+        message_id: Optional[int],
+        text: str,
+        max_retries: int = 3,
+    ):
+        """Редактирует ЛС-сообщение оплаты, убирая кнопку и показывая новый статус."""
+        if not user_id or not message_id:
+            return
+
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                await self._throttle_api_call(chat_id=user_id)
+                await bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=message_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=None,
+                )
+                return
+            except RetryAfter as e:
+                attempt += 1
+                await asyncio.sleep(e.retry_after + 0.5)
+            except TimedOut:
+                attempt += 1
+                await asyncio.sleep(1.0 * attempt)
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    return
+                logger.debug("Не удалось отредактировать payment message: %s", e)
+                return
+            except Exception as e:
+                logger.debug("Ошибка редактирования payment message: %s", e)
+                return
+
+    async def _update_duel_invoice_messages_status(
+        self,
+        bot,
+        game,
+        challenger_text: str,
+        target_text: str,
+    ):
+        await self._edit_private_payment_message(
+            bot,
+            game.challenger.id if game.challenger else None,
+            getattr(game, "challenger_invoice_message_id", None),
+            challenger_text,
+        )
+        await self._edit_private_payment_message(
+            bot,
+            game.target_user.id if game.target_user else None,
+            getattr(game, "target_invoice_message_id", None),
+            target_text,
+        )
+
+    async def _update_multi_invoice_messages_status(
+        self,
+        bot,
+        game,
+        text_by_user_id: Dict[int, str],
+    ):
+        message_map = getattr(game, "players_invoice_message_ids", None)
+        if not isinstance(message_map, dict):
+            return
+
+        for player in game.players:
+            text = text_by_user_id.get(player.id)
+            if not text:
+                continue
+            await self._edit_private_payment_message(
+                bot,
+                player.id,
+                message_map.get(player.id),
+                text,
+            )
     
     async def _send_message_with_logo(self, update_message, text: str, reply_markup: InlineKeyboardMarkup, logo_filenames: List[str], max_retries: int = 2):
         """Отправляет сообщение с фото, если файл найден, иначе текстом"""
@@ -797,7 +949,7 @@ class DiceBot:
             logger.error(f"Не удалось отправить ход игроку @{player.user.username}: {e}")
             await context.bot.send_message(
                 game.chat_id,
-                f"⚠️ @{player.user.username}, напишите /start боту в ЛС, чтобы продолжить игру!",
+                f"⚠️ @{player.user.username}, откройте ЛС с ботом и нажмите «Старт/Start».",
                 parse_mode=ParseMode.HTML
             )
 
@@ -863,7 +1015,7 @@ class DiceBot:
         if update.effective_chat.type != "private":
             # Убираем клавиатуру из группового чата
             await update.message.reply_text(
-                "❌ Команда /start работает только в личных сообщениях с ботом.\n"
+                "❌ Старт/Start работает только в личных сообщениях с ботом.\n"
                 "Напишите боту в ЛС для доступа к меню.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=ReplyKeyboardRemove()
@@ -1818,6 +1970,20 @@ class DiceBot:
     async def _cancel_regular_game(self, game, context: ContextTypes.DEFAULT_TYPE):
         """Выполняет отмену обычной дуэли и возвращает текст уведомления"""
         refund_messages = []
+        await self._update_duel_invoice_messages_status(
+            context.bot,
+            game,
+            (
+                f"❌ <b>Игра отменена</b>\n\n"
+                f"Матч <code>{game.game_id[:6]}</code>\n"
+                f"Счёт больше неактивен."
+            ),
+            (
+                f"❌ <b>Игра отменена</b>\n\n"
+                f"Матч <code>{game.game_id[:6]}</code>\n"
+                f"Счёт больше неактивен."
+            ),
+        )
 
         if game.challenger_paid:
             success, check_link, check_data = await self.escrow_manager.refund_stake(
@@ -1894,6 +2060,18 @@ class DiceBot:
     async def _cancel_multi_game(self, game, context: ContextTypes.DEFAULT_TYPE, cancelled_by_creator: bool = False):
         """Отменяет мультиигру и возвращает текст уведомления"""
         refund_messages = []
+        await self._update_multi_invoice_messages_status(
+            context.bot,
+            game,
+            {
+                player.id: (
+                    f"❌ <b>Мультиигра отменена</b>\n\n"
+                    f"Игра <code>{game.game_id[:6]}</code>\n"
+                    f"Счёт больше неактивен."
+                )
+                for player in game.players
+            },
+        )
         for player in game.players:
             if game.players_paid.get(player.id):
                 success, check_link, check_data = await self.escrow_manager.refund_stake(
@@ -1944,6 +2122,20 @@ class DiceBot:
 
     async def _cancel_blackjack_game(self, game: BlackjackGame, context: ContextTypes.DEFAULT_TYPE, reason: str = "администратором"):
         refund_messages = []
+        await self._update_duel_invoice_messages_status(
+            context.bot,
+            game,
+            (
+                f"❌ <b>Blackjack отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code>\n"
+                f"Счёт больше неактивен."
+            ),
+            (
+                f"❌ <b>Blackjack отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code>\n"
+                f"Счёт больше неактивен."
+            ),
+        )
         players = [
             (game.challenger, game.challenger_paid),
             (game.target_user, game.target_paid)
@@ -1987,6 +2179,20 @@ class DiceBot:
     async def _cancel_knb_game(self, game: RockPaperScissorsGame, context: ContextTypes.DEFAULT_TYPE, reason: str = "администратором"):
         """Отменяет игру КНБ с возвратом ставок"""
         refund_messages = []
+        await self._update_duel_invoice_messages_status(
+            context.bot,
+            game,
+            (
+                f"❌ <b>КНБ отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code>\n"
+                f"Счёт больше неактивен."
+            ),
+            (
+                f"❌ <b>КНБ отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code>\n"
+                f"Счёт больше неактивен."
+            ),
+        )
         players = [
             (game.challenger, game.challenger_paid),
             (game.target_user, game.target_paid)
@@ -2869,14 +3075,11 @@ class DiceBot:
             logger.warning(f"Игрок @{user.username} не написал /start в ЛС бота: {e}")
             # Отправляем уведомление в чат
             await query.message.chat.send_message(
-                f"⚠️ @{user.username}, вы не написали /start боту в личные сообщения!\n\n"
-                f"Для участия в игре необходимо:\n"
-                f"1️⃣ Перейти в Личные Сообщения с ботом\n"
-                f"2️⃣ Нажать кнопку «Старт/Start» или написать /start\n"
-                f"3️⃣ Вернуться сюда и снова нажать «Принять предложение»",
+                f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
+                f"Потом вернитесь сюда и нажмите «Принять предложение» ещё раз.",
                 parse_mode=ParseMode.HTML
             )
-            await query.answer("⚠️ Сначала напишите /start боту в ЛС!")
+            await query.answer("⚠️ Нажмите «Старт/Start» в ЛС с ботом")
             return
             
         # Добавляем игрока
@@ -2894,6 +3097,8 @@ class DiceBot:
             logger.info(f"Мультиигра {game_id}: начат отсчёт 5 минут на оплату")
             
             # Отправляем счета всем игрокам в ЛС
+            if not isinstance(getattr(game, "players_invoice_message_ids", None), dict):
+                game.players_invoice_message_ids = {}
             for player in game.players:
                 payment_info = await self.escrow_manager.create_invoice_in_bot(
                     f"{game_id}_{player.id}",
@@ -2911,17 +3116,18 @@ class DiceBot:
                             f"Игроков: {game.max_players}\n"
                             f"Кубиков: {game.dice_count}\n\n"
                             f"Оплатите участие в течение 5 мин.\n"
-                            f"После оплаты бот подтвердит её автоматически (webhook)."
+                            f"После оплаты бот подтвердит её автоматически."
                         )
                         
                         keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=payment_info['pay_url'])]]
                         
-                        await bot.send_message(
+                        sent_message = await bot.send_message(
                             player.id,
                             invoice_text,
                             reply_markup=InlineKeyboardMarkup(keyboard),
                             parse_mode=ParseMode.HTML
                         )
+                        game.players_invoice_message_ids[player.id] = sent_message.message_id
                     except Exception as e:
                         logger.error(f"Ошибка отправки счета игроку {player.username}: {e}")
             await self._upsert_state_event("multi_invoices_created")
@@ -2973,14 +3179,11 @@ class DiceBot:
                 logger.warning(f"Игрок @{user.username} не написал /start боту в ЛС: {e}")
                 # Отправляем инструкцию в чат
                 await query.message.chat.send_message(
-                    f"⚠️ @{user.username}, вы не написали /start боту в личные сообщения!\n\n"
-                    f"Для участия в игре необходимо:\n"
-                    f"1️⃣ Перейти в Личные Сообщения с ботом\n"
-                    f"2️⃣ Нажать кнопку «Старт/Start» или написать /start\n"
-                    f"3️⃣ Вернуться сюда и снова нажать «Принять вызов»",
+                    f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
+                    f"Потом вернитесь сюда и нажмите «Принять вызов» ещё раз.",
                     parse_mode=ParseMode.HTML
                 )
-                await query.answer("⚠️ Сначала напишите /start боту в ЛС!")
+                await query.answer("⚠️ Нажмите «Старт/Start» в ЛС с ботом")
                 return
             
         game.target_user = query.from_user
@@ -3018,17 +3221,18 @@ class DiceBot:
                     f"Списано: 0.00\n"
                     f"К оплате: <b>{game.bet_amount} USDT</b>\n\n"
                     f"Оплатите участие в течение 5 мин.\n"
-                    f"После оплаты бот подтвердит её автоматически (webhook)."
+                    f"После оплаты бот подтвердит её автоматически."
                 )
                 
                 keyboard_challenger = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=challenger_payment['pay_url'])]]
                 
-                await bot.send_message(
+                challenger_invoice_msg = await bot.send_message(
                     game.challenger.id,
                     challenger_invoice_text,
                     reply_markup=InlineKeyboardMarkup(keyboard_challenger),
                     parse_mode=ParseMode.HTML
                 )
+                game.challenger_invoice_message_id = challenger_invoice_msg.message_id
                 
                 # Счет для target в ЛС
                 target_invoice_text = (
@@ -3037,17 +3241,18 @@ class DiceBot:
                     f"Списано: 0.00\n"
                     f"К оплате: <b>{game.bet_amount} USDT</b>\n\n"
                     f"Оплатите участие в течение 5 мин.\n"
-                    f"После оплаты бот подтвердит её автоматически (webhook)."
+                    f"После оплаты бот подтвердит её автоматически."
                 )
                 
                 keyboard_target = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=target_payment['pay_url'])]]
                 
-                await bot.send_message(
+                target_invoice_msg = await bot.send_message(
                     game.target_user.id,
                     target_invoice_text,
                     reply_markup=InlineKeyboardMarkup(keyboard_target),
                     parse_mode=ParseMode.HTML
                 )
+                game.target_invoice_message_id = target_invoice_msg.message_id
                 
                 # В чате показываем уведомление
                 chat_notification = (
@@ -3060,10 +3265,11 @@ class DiceBot:
                     chat_notification,
                     reply_markup=None
                 )
+                await self._upsert_state_event("duel_invoice_messages_sent")
                 
             except Exception as e:
                 logger.error(f"Ошибка отправки счетов: {e}")
-                await self._edit_query_message(query, "❌ Ошибка! Убедитесь, что вы написали боту /start в ЛС!")
+                await self._edit_query_message(query, "❌ Ошибка! Нажмите «Старт/Start» в ЛС с ботом и повторите.")
         else:
             await self._edit_query_message(query, "❌ Ошибка при создании счетов!")
             
@@ -3083,6 +3289,20 @@ class DiceBot:
         
         # Возвращаем ставки, если они были оплачены
         refund_messages = []
+        await self._update_duel_invoice_messages_status(
+            query.bot,
+            game,
+            (
+                f"❌ <b>Матч отменён</b>\n\n"
+                f"Матч <code>{game.game_id[:6]}</code> был отклонён.\n"
+                f"Счёт больше неактивен."
+            ),
+            (
+                f"❌ <b>Матч отменён</b>\n\n"
+                f"Матч <code>{game.game_id[:6]}</code> был отклонён.\n"
+                f"Счёт больше неактивен."
+            ),
+        )
         if game.challenger_paid:
             success, check_link, check_data = await self.escrow_manager.refund_stake(
                 game.challenger.id,
@@ -3177,14 +3397,11 @@ class DiceBot:
                 logger.warning(f"Игрок @{user.username} не написал /start боту в ЛС: {e}")
                 # Отправляем инструкцию в чат
                 await query.message.chat.send_message(
-                    f"⚠️ @{user.username}, вы не написали /start боту в личные сообщения!\n\n"
-                    f"Для участия в игре необходимо:\n"
-                    f"1️⃣ Перейти в Личные Сообщения с ботом\n"
-                    f"2️⃣ Нажать кнопку «Старт/Start» или написать /start\n"
-                    f"3️⃣ Вернуться сюда и снова нажать «Принять»",
+                    f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
+                    f"Потом вернитесь сюда и нажмите «Принять» ещё раз.",
                     parse_mode=ParseMode.HTML
                 )
-                await query.answer("⚠️ Сначала напишите /start боту в ЛС!")
+                await query.answer("⚠️ Нажмите «Старт/Start» в ЛС с ботом")
                 return
         
         game.set_target_user(query.from_user)
@@ -3214,25 +3431,39 @@ class DiceBot:
         game.target_payment_id = target_invoice["invoice_id"]
         await self._upsert_state_event("blackjack_invoices_created")
         
-        for player, invoice in [
-            (game.challenger, challenger_invoice),
-            (game.target_user, target_invoice)
-        ]:
-            try:
-                keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=invoice["pay_url"])]]
-                await context.bot.send_message(
-                    chat_id=player.id,
-                    text=(
-                        f"🃏 <b>Blackjack {game_id[:6]}</b>\n\n"
-                        f"Ставка: {game.bet_amount} USDT\n"
-                        f"Оплатите участие в течение 5 минут.\n"
-                        f"После оплаты бот подтвердит её автоматически (webhook)."
-                    ),
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode=ParseMode.HTML
-                )
-            except Exception as e:
-                logger.error(f"Ошибка отправки счета игроку {player.username}: {e}")
+        try:
+            keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=challenger_invoice["pay_url"])]]
+            challenger_invoice_msg = await context.bot.send_message(
+                chat_id=game.challenger.id,
+                text=(
+                    f"🃏 <b>Blackjack {game_id[:6]}</b>\n\n"
+                    f"Ставка: {game.bet_amount} USDT\n"
+                    f"Оплатите участие в течение 5 минут.\n"
+                    f"После оплаты бот подтвердит её автоматически."
+                ),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.HTML
+            )
+            game.challenger_invoice_message_id = challenger_invoice_msg.message_id
+        except Exception as e:
+            logger.error(f"Ошибка отправки счета игроку {game.challenger.username}: {e}")
+
+        try:
+            keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=target_invoice["pay_url"])]]
+            target_invoice_msg = await context.bot.send_message(
+                chat_id=game.target_user.id,
+                text=(
+                    f"🃏 <b>Blackjack {game_id[:6]}</b>\n\n"
+                    f"Ставка: {game.bet_amount} USDT\n"
+                    f"Оплатите участие в течение 5 минут.\n"
+                    f"После оплаты бот подтвердит её автоматически."
+                ),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.HTML
+            )
+            game.target_invoice_message_id = target_invoice_msg.message_id
+        except Exception as e:
+            logger.error(f"Ошибка отправки счета игроку {game.target_username}: {e}")
         
         # Используем _edit_query_message для поддержки фото-сообщений
         await self._edit_query_message(
@@ -3241,6 +3472,7 @@ class DiceBot:
             f"Ожидание оплаты от @{game.challenger.username} и @{game.target_username}.",
             reply_markup=None
         )
+        await self._upsert_state_event("blackjack_invoice_messages_sent")
 
     async def handle_blackjack_decline(self, query, game_id: str):
         """Обработка отклонения приглашения на Blackjack"""
@@ -3262,6 +3494,20 @@ class DiceBot:
         
         # Возвращаем ставки, если они были оплачены
         refund_messages = []
+        await self._update_duel_invoice_messages_status(
+            query.bot,
+            game,
+            (
+                f"❌ <b>Blackjack отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code> была отклонена.\n"
+                f"Счёт больше неактивен."
+            ),
+            (
+                f"❌ <b>Blackjack отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code> была отклонена.\n"
+                f"Счёт больше неактивен."
+            ),
+        )
         if game.challenger_paid:
             success, check_link, check_data = await self.escrow_manager.refund_stake(
                 game.challenger.id,
@@ -3355,11 +3601,8 @@ class DiceBot:
                 logger.warning(f"Игрок @{user.username} не написал /start боту в ЛС: {e}")
                 # Отправляем инструкцию в чат
                 await query.message.chat.send_message(
-                    f"⚠️ @{user.username}, вы не написали /start боту в личные сообщения!\n\n"
-                    f"Для участия в игре необходимо:\n"
-                    f"1️⃣ Перейти в Личные Сообщения с ботом\n"
-                    f"2️⃣ Написать /start\n"
-                    f"3️⃣ Вернуться сюда и принять вызов заново",
+                    f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
+                    f"Потом вернитесь сюда и нажмите «Принять» ещё раз.",
                     parse_mode=ParseMode.HTML
                 )
                 return
@@ -3390,31 +3633,33 @@ class DiceBot:
             try:
                 # Отправляем счет инициатору
                 keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=challenger_payment['pay_url'])]]
-                await context.bot.send_message(
+                challenger_invoice_msg = await context.bot.send_message(
                     chat_id=game.challenger.id,
                     text=(
                         f"🗿📄✂️ <b>КНБ {game_id[:6]}</b>\n\n"
                         f"Ставка: {game.bet_amount} USDT\n"
                         f"Оплатите участие в течение 5 минут.\n"
-                        f"После оплаты бот подтвердит её автоматически (webhook)."
+                        f"После оплаты бот подтвердит её автоматически."
                     ),
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
                 )
+                game.challenger_invoice_message_id = challenger_invoice_msg.message_id
                 
                 # Отправляем счет оппоненту
                 keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=target_payment['pay_url'])]]
-                await context.bot.send_message(
+                target_invoice_msg = await context.bot.send_message(
                     chat_id=game.target_user.id,
                     text=(
                         f"🗿📄✂️ <b>КНБ {game_id[:6]}</b>\n\n"
                         f"Ставка: {game.bet_amount} USDT\n"
                         f"Оплатите участие в течение 5 минут.\n"
-                        f"После оплаты бот подтвердит её автоматически (webhook)."
+                        f"После оплаты бот подтвердит её автоматически."
                     ),
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
                 )
+                game.target_invoice_message_id = target_invoice_msg.message_id
             except Exception as e:
                 logger.error(f"Ошибка отправки счета: {e}")
             
@@ -3424,6 +3669,7 @@ class DiceBot:
                 f"Ожидание оплаты от @{game.challenger.username} и @{game.target_username}.",
                 reply_markup=None
             )
+            await self._upsert_state_event("knb_invoice_messages_sent")
         else:
             await self._edit_query_message(query, "❌ Ошибка при создании счетов!")
     
@@ -3447,6 +3693,20 @@ class DiceBot:
         
         # Возвращаем ставки, если они были оплачены
         refund_messages = []
+        await self._update_duel_invoice_messages_status(
+            query.bot,
+            game,
+            (
+                f"❌ <b>КНБ отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code> была отклонена.\n"
+                f"Счёт больше неактивен."
+            ),
+            (
+                f"❌ <b>КНБ отменён</b>\n\n"
+                f"Игра <code>{game.game_id[:6]}</code> была отклонена.\n"
+                f"Счёт больше неактивен."
+            ),
+        )
         if game.challenger_paid:
             success, check_link, check_data = await self.escrow_manager.refund_stake(
                 game.challenger.id,
@@ -4412,6 +4672,20 @@ class DiceBot:
                     # Время истекло - возвращаем ставки тем, кто оплатил
                     logger.info(f"Игра {game_id}: истекло время оплаты (прошло {time_elapsed.seconds} секунд)")
                     refund_messages = []
+                    await self._update_duel_invoice_messages_status(
+                        context.bot,
+                        game,
+                        (
+                            f"⏰ <b>Время оплаты истекло</b>\n\n"
+                            f"Матч <code>{game.game_id[:6]}</code> отменён.\n"
+                            f"Счёт больше неактивен."
+                        ),
+                        (
+                            f"⏰ <b>Время оплаты истекло</b>\n\n"
+                            f"Матч <code>{game.game_id[:6]}</code> отменён.\n"
+                            f"Счёт больше неактивен."
+                        ),
+                    )
                     
                     if game.challenger_paid:
                         success, check_link, check_data = await self.escrow_manager.refund_stake(
@@ -4482,6 +4756,20 @@ class DiceBot:
                 if game.payment_start_time:
                     elapsed = datetime.now() - game.payment_start_time
                     if elapsed > timedelta(minutes=5):
+                        await self._update_duel_invoice_messages_status(
+                            context.bot,
+                            game,
+                            (
+                                f"⏰ <b>Время оплаты истекло</b>\n\n"
+                                f"Blackjack <code>{game.game_id[:6]}</code> отменён.\n"
+                                f"Счёт больше неактивен."
+                            ),
+                            (
+                                f"⏰ <b>Время оплаты истекло</b>\n\n"
+                                f"Blackjack <code>{game.game_id[:6]}</code> отменён.\n"
+                                f"Счёт больше неактивен."
+                            ),
+                        )
                         await context.bot.send_message(
                             game.chat_id,
                             "⏰ Оплата не поступила вовремя. Игра отменена.",
@@ -4504,6 +4792,20 @@ class DiceBot:
                 if game.payment_start_time:
                     elapsed = datetime.now() - game.payment_start_time
                     if elapsed > timedelta(minutes=5):
+                        await self._update_duel_invoice_messages_status(
+                            context.bot,
+                            game,
+                            (
+                                f"⏰ <b>Время оплаты истекло</b>\n\n"
+                                f"КНБ <code>{game.game_id[:6]}</code> отменён.\n"
+                                f"Счёт больше неактивен."
+                            ),
+                            (
+                                f"⏰ <b>Время оплаты истекло</b>\n\n"
+                                f"КНБ <code>{game.game_id[:6]}</code> отменён.\n"
+                                f"Счёт больше неактивен."
+                            ),
+                        )
                         await context.bot.send_message(
                             game.chat_id,
                             "⏰ Оплата не поступила вовремя. Игра отменена.",
@@ -4532,6 +4834,18 @@ class DiceBot:
                 if time_elapsed > timedelta(minutes=5) and game.payment_start_time:
                     # Возврат оплатившим
                     logger.info(f"Мультиигра {game_id}: истекло время оплаты (прошло {time_elapsed.seconds} секунд)")
+                    await self._update_multi_invoice_messages_status(
+                        context.bot,
+                        game,
+                        {
+                            player.id: (
+                                f"⏰ <b>Время оплаты истекло</b>\n\n"
+                                f"Мультиигра <code>{game.game_id[:6]}</code> отменена.\n"
+                                f"Счёт больше неактивен."
+                            )
+                            for player in game.players
+                        },
+                    )
                     for player in game.players:
                         if game.players_paid[player.id]:
                             success, check_link, check_data = await self.escrow_manager.refund_stake(

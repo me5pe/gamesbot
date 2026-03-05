@@ -193,6 +193,17 @@ class DatabaseManager:
                 status,
             )
 
+    async def delete_payout(self, game_id: str):
+        """Удаляет payout-запись игры после полного завершения процесса."""
+        if not self.pool:
+            raise RuntimeError("PostgreSQL pool не инициализирован.")
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM payouts WHERE game_id = $1;",
+                game_id,
+            )
+
     async def get_payout(self, game_id: str) -> Optional[Dict[str, Any]]:
         if not self.pool:
             raise RuntimeError("PostgreSQL pool не инициализирован.")
