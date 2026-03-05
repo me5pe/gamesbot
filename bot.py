@@ -312,6 +312,8 @@ class DiceBot:
 
         app = web.Application()
         app.router.add_get("/health", self._cryptobot_health_handler)
+        # Fallback: некоторые настройки в @CryptoBot указывают webhook на корень домена.
+        app.router.add_post("/", self._cryptobot_webhook_handler)
         app.router.add_post(self._cryptobot_webhook_path, self._cryptobot_webhook_handler)
 
         self._webhook_runner = web.AppRunner(app)
@@ -331,15 +333,19 @@ class DiceBot:
 
     async def _configure_cryptobot_webhook(self):
         if not self._public_base_url:
-            logger.warning("PUBLIC_BASE_URL не задан. Регистрация webhook CryptoBot пропущена.")
+            logger.warning(
+                "PUBLIC_BASE_URL не задан. "
+                "Укажите webhook URL вручную в @CryptoBot -> My Apps -> Webhooks."
+            )
             return
 
         webhook_url = f"{self._public_base_url}{self._cryptobot_webhook_path}"
-        success = await self.escrow_manager.set_webhook(webhook_url)
-        if success:
-            logger.info("Webhook CryptoBot зарегистрирован: %s", webhook_url)
-        else:
-            logger.error("Не удалось зарегистрировать webhook CryptoBot: %s", webhook_url)
+        logger.info(
+            "Crypto Pay API не поддерживает setWebhook через HTTP API. "
+            "Настройте webhook вручную в @CryptoBot."
+        )
+        logger.info("Рекомендуемый Webhook URL: %s", webhook_url)
+        logger.info("Дополнительный fallback URL: %s/", self._public_base_url)
 
     async def on_startup(self, application: Application):
         self.application = application
