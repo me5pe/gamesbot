@@ -1257,8 +1257,22 @@ class DiceBot:
             
             keyboard = [
                 [
-                    InlineKeyboardButton("✅ Принять", callback_data=f"accept_{game_id}"),
-                    InlineKeyboardButton("❌ Отклонить", callback_data=f"decline_{game_id}")
+                    InlineKeyboardButton(
+                        "✅ Принять",
+                        callback_data=f"accept_{game_id}",
+                        api_kwargs=self.message_formatter.build_button_api_kwargs(
+                            "success",
+                            "accept",
+                        ),
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Отклонить",
+                        callback_data=f"decline_{game_id}",
+                        api_kwargs=self.message_formatter.build_button_api_kwargs(
+                            "danger",
+                            "decline",
+                        ),
+                    )
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1347,15 +1361,30 @@ class DiceBot:
             self.active_blackjack_games[game_id] = game
             await self._upsert_state_event("blackjack_created")
             
+            blackjack_invite_emoji = self.message_formatter.get_premium_text_emoji("blackjack_invite", "🃏")
             text = (
-                f"🃏 @{challenger.username} приглашает @{target_username} сыграть в Blackjack!\n"
+                f"{blackjack_invite_emoji} @{challenger.username} приглашает @{target_username} сыграть в Blackjack!\n"
                 f"Ставка: <b>{bet_amount} USDT</b>\n\n"
                 f"Ожидание ответа от @{target_username}."
             )
             keyboard = [
                 [
-                    InlineKeyboardButton("✅ Принять", callback_data=f"blackjack_accept_{game_id}"),
-                    InlineKeyboardButton("❌ Отклонить", callback_data=f"blackjack_decline_{game_id}")
+                    InlineKeyboardButton(
+                        "✅ Принять",
+                        callback_data=f"blackjack_accept_{game_id}",
+                        api_kwargs=self.message_formatter.build_button_api_kwargs(
+                            "success",
+                            "accept",
+                        ),
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Отклонить",
+                        callback_data=f"blackjack_decline_{game_id}",
+                        api_kwargs=self.message_formatter.build_button_api_kwargs(
+                            "danger",
+                            "decline",
+                        ),
+                    )
                 ]
             ]
             
@@ -1467,16 +1496,31 @@ class DiceBot:
             self.active_knb_games[game_id] = game
             await self._upsert_state_event("knb_created")
             
+            knb_invite_emoji = self.message_formatter.get_premium_text_emoji("knb_invite", "🗿")
             text = (
-                f"🗿📄✂️ @{challenger.username} приглашает @{target_username} сыграть в Камень-Ножницы-Бумага!\n"
+                f"{knb_invite_emoji} @{challenger.username} приглашает @{target_username} сыграть в Камень-Ножницы-Бумага!\n"
                 f"Ставка: <b>{bet_amount} USDT</b>\n\n"
                 f"Игра до 3 побед. При ничье - переигровка раунда.\n\n"
                 f"Ожидание ответа от @{target_username}."
             )
             keyboard = [
                 [
-                    InlineKeyboardButton("✅ Принять", callback_data=f"knb_accept_{game_id}"),
-                    InlineKeyboardButton("❌ Отклонить", callback_data=f"knb_decline_{game_id}")
+                    InlineKeyboardButton(
+                        "✅ Принять",
+                        callback_data=f"knb_accept_{game_id}",
+                        api_kwargs=self.message_formatter.build_button_api_kwargs(
+                            "success",
+                            "accept",
+                        ),
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Отклонить",
+                        callback_data=f"knb_decline_{game_id}",
+                        api_kwargs=self.message_formatter.build_button_api_kwargs(
+                            "danger",
+                            "decline",
+                        ),
+                    )
                 ]
             ]
             
@@ -1665,8 +1709,9 @@ class DiceBot:
                 
                 # Формируем сообщение
                 players_list = multi_game.get_players_list_text()
+                multi_invite_emoji = self.message_formatter.get_premium_text_emoji("multi_invite", "🎲")
                 search_text = (
-                    f"🎲 <b>Мульти-куб создан!</b>\n\n"
+                    f"{multi_invite_emoji} <b>Мульти-куб создан!</b>\n\n"
                     f"Ставка: <b>{bet_amount} USDT</b>\n"
                     f"Кубиков: <b>{dice_count}</b>\n\n"
                     f"{players_list}"
@@ -1723,8 +1768,9 @@ class DiceBot:
                 
                 # Отправляем сообщение с поиском игроков
                 players_list = multi_game.get_players_list_text()
+                multi_invite_emoji = self.message_formatter.get_premium_text_emoji("multi_invite", "🎲")
                 search_text = (
-                    f"🎲 <b>Поиск игроков для Мульти-куб</b>\n\n"
+                    f"{multi_invite_emoji} <b>Поиск игроков для Мульти-куб</b>\n\n"
                     f"Ставка: <b>{bet_amount} USDT</b>\n"
                     f"Кубиков: <b>{dice_count}</b>\n\n"
                     f"{players_list}"
@@ -1749,8 +1795,26 @@ class DiceBot:
     
     def _build_multi_game_keyboard(self, game: MultiDiceGame) -> InlineKeyboardMarkup:
         buttons = [
-            [InlineKeyboardButton("✅ Принять предложение", callback_data=f"multi_join_{game.game_id}")],
-            [InlineKeyboardButton("❌ Отменить мульти-дуэль", callback_data=f"multi_cancel_{game.game_id}")]
+            [
+                InlineKeyboardButton(
+                    "✅ Принять предложение",
+                    callback_data=f"multi_join_{game.game_id}",
+                    api_kwargs=self.message_formatter.build_button_api_kwargs(
+                        "success",
+                        "multi_join",
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "❌ Отменить мульти-дуэль",
+                    callback_data=f"multi_cancel_{game.game_id}",
+                    api_kwargs=self.message_formatter.build_button_api_kwargs(
+                        "danger",
+                        "decline",
+                    ),
+                )
+            ]
         ]
         return InlineKeyboardMarkup(buttons)
     

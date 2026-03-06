@@ -1,17 +1,65 @@
+import os
 from typing import Optional
 from telegram import User
 from game_logic import DiceGame
 from multi_game_logic import MultiDiceGame
 
 class MessageFormatter:
+    # ============================================================
+    # PREMIUM EMOJI CONFIG
+    # Меняйте emoji-id в этом блоке, чтобы быстро обновлять эмодзи
+    # в конкретных сообщениях/кнопках.
+    # Пустое значение = будет использован обычный fallback-эмодзи.
+    # ============================================================
+    PREMIUM_TEXT_EMOJI = {
+        # [DUEL] Заголовок сообщения вызова на дуэль (format_challenge_message)
+        "duel_invite": os.getenv("PE_DUEL_INVITE", "5280816565657300091"),
+        # [BLACKJACK] Заголовок приглашения в blackjack (blackjack_command в bot.py)
+        "blackjack_invite": os.getenv("PE_BLACKJACK_INVITE", "6028206863038811654"),
+        # [RPS] Заголовок приглашения в КНБ (knb_command в bot.py)
+        "knb_invite": os.getenv("PE_KNB_INVITE", "5269640498112378277"),
+        # [MULTI] Заголовок создания/поиска игроков в мульти-игре (multiduel_command в bot.py)
+        "multi_invite": os.getenv("PE_MULTI_INVITE", "5280816565657300091"),
+    }
+
+    PREMIUM_BUTTON_EMOJI = {
+        # [BUTTON] Кнопка "Принять" (все игры)
+        "accept": os.getenv("PE_BTN_ACCEPT", "5273806972871787310"),
+        # [BUTTON] Кнопка "Отклонить"/"Отменить" (все игры)
+        "decline": os.getenv("PE_BTN_DECLINE", "5271934564699226262"),
+        # [BUTTON] Кнопка "Принять предложение" (мульти-игра)
+        "multi_join": os.getenv("PE_BTN_MULTI_JOIN", "5273806972871787310"),
+    }
+
     def __init__(self):
         self.bot_name = "Illidan Games"
+
+    def get_premium_text_emoji(self, key: str, fallback: str) -> str:
+        """Возвращает premium-эмодзи для текста (HTML) или fallback."""
+        emoji_id = (self.PREMIUM_TEXT_EMOJI.get(key) or "").strip()
+        if not emoji_id:
+            return fallback
+        return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+
+    def build_button_api_kwargs(self, style: str, emoji_key: Optional[str] = None) -> dict:
+        """
+        Формирует api_kwargs для InlineKeyboardButton:
+        - style: primary/success/danger
+        - icon_custom_emoji_id: берется из PREMIUM_BUTTON_EMOJI
+        """
+        kwargs = {"style": style}
+        if emoji_key:
+            emoji_id = (self.PREMIUM_BUTTON_EMOJI.get(emoji_key) or "").strip()
+            if emoji_id:
+                kwargs["icon_custom_emoji_id"] = emoji_id
+        return kwargs
         
     def format_challenge_message(self, challenger_username: str, target_username: str, bet_amount: float, dice_count: int = 3) -> str:
         """Форматирует сообщение с вызовом на дуэль"""
         dice_text = "3 кубика" if dice_count == 3 else f"{dice_count} кубик" if dice_count == 1 else f"{dice_count} кубика"
+        invite_emoji = self.get_premium_text_emoji("duel_invite", "🎲")
         return (
-            f"🎲 <b>Кубик</b>\n\n"
+            f"{invite_emoji} <b>Кубик</b>\n\n"
             f"@{challenger_username} вызывает @{target_username} на {bet_amount} USDT.\n"
             f"🎲 Количество кубиков: <b>{dice_text}</b>\n\n"
             f"Принять?"
