@@ -47,6 +47,9 @@ PREMIUM_TEXT_EMOJI = {
     "check_mark": os.getenv("PE_TXT_CHECK_MARK", "5273806972871787310"),
     "bust_in_silhouette": os.getenv("PE_TXT_BUST_IN_SILHOUETTE", "5199445141764475415"),
     "warning": os.getenv("PE_TXT_WARNING", "5269744182917866822"),
+    "wave": os.getenv("PE_TXT_WAVE", ""),
+    "green_circle": os.getenv("PE_TXT_GREEN_CIRCLE", ""),
+    "down_arrow": os.getenv("PE_TXT_DOWN_ARROW", ""),
 
 }
 
@@ -54,6 +57,11 @@ PREMIUM_BUTTON_EMOJI = {
     "accept": os.getenv("PE_BTN_ACCEPT", "5273806972871787310"),
     "decline": os.getenv("PE_BTN_DECLINE", "5271934564699226262"),
     "multi_join": os.getenv("PE_BTN_MULTI_JOIN", "5273806972871787310"),
+    "menu_profile": os.getenv("PE_BTN_MENU_PROFILE", ""),
+    "menu_stats": os.getenv("PE_BTN_MENU_STATS", ""),
+    "menu_top": os.getenv("PE_BTN_MENU_TOP", ""),
+    "menu_info": os.getenv("PE_BTN_MENU_INFO", ""),
+    "menu_help": os.getenv("PE_BTN_MENU_HELP", ""),
 }
 
 # Автозамена символов в UI-текстах
@@ -88,6 +96,9 @@ CHAR_TO_KEY = {
     "👤": "bust_in_silhouette",
     "👥": "bust_in_silhouette",
     "⚠️": "warning",
+    "👋": "wave",
+    "🟢": "green_circle",
+    "⬇️": "down_arrow",
 }
 
 
@@ -108,8 +119,10 @@ def premiumize_text(text: str) -> str:
     return result
 
 
-def build_button_api_kwargs(style: str, emoji_key: Optional[str] = None) -> dict:
-    kwargs = {"style": style}
+def build_button_api_kwargs(style: Optional[str] = None, emoji_key: Optional[str] = None) -> dict:
+    kwargs: dict = {}
+    if style:
+        kwargs["style"] = style
     if emoji_key:
         emoji_id = (PREMIUM_BUTTON_EMOJI.get(emoji_key) or "").strip()
         if emoji_id:

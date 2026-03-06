@@ -31,6 +31,7 @@ from knb_game import RockPaperScissorsGame
 from PIL import Image, ImageDraw, ImageFont
 from escrow_system import EscrowManager
 from ui_messages import MessageFormatter
+from ui_premium_emojis import premiumize_text, build_button_api_kwargs
 from user_profile import ProfileManager
 from check_manager import CheckManager
 from db_storage import DatabaseManager
@@ -1050,7 +1051,8 @@ class DiceBot:
         """Показывает главное меню (личный кабинет)"""
         user = update.effective_user
         
-        menu_text = (
+        menu_text = premiumize_text(
+            (
             f"🎲 <b>Illidan Games</b>\n\n"
             f"👋 Добро пожаловать, <b>@{user.username}</b>!\n\n"
             f"📊 <b>Статус системы</b>\n"
@@ -1064,21 +1066,42 @@ class DiceBot:
             f"• 🗿📄✂️ Камень-Ножницы-Бумага\n"
             f"• 🎲 Мульти-дуэли (3-5 игроков)\n\n"
             f"Выберите раздел ниже ⬇️"
+            )
         )
         
         keyboard = [
             # Профиль и статистика
             [
-                InlineKeyboardButton("👤 Мой профиль", callback_data="profile"),
-                InlineKeyboardButton("📊 Статистика", callback_data="stats")
+                InlineKeyboardButton(
+                    "Мой профиль",
+                    callback_data="profile",
+                    api_kwargs=build_button_api_kwargs(emoji_key="menu_profile"),
+                ),
+                InlineKeyboardButton(
+                    "Статистика",
+                    callback_data="stats",
+                    api_kwargs=build_button_api_kwargs(emoji_key="menu_stats"),
+                )
             ],
             [
-                InlineKeyboardButton("🏆 Топ-10 игроков", callback_data="top_players")
+                InlineKeyboardButton(
+                    "Топ-10 игроков",
+                    callback_data="top_players",
+                    api_kwargs=build_button_api_kwargs(emoji_key="menu_top"),
+                )
             ],
             # Информация
             [
-                InlineKeyboardButton("📋 О боте", callback_data="info_menu"),
-                InlineKeyboardButton("❓ Помощь", callback_data="help_menu")
+                InlineKeyboardButton(
+                    "О боте",
+                    callback_data="info_menu",
+                    api_kwargs=build_button_api_kwargs(emoji_key="menu_info"),
+                ),
+                InlineKeyboardButton(
+                    "Помощь",
+                    callback_data="help_menu",
+                    api_kwargs=build_button_api_kwargs(emoji_key="menu_help"),
+                )
             ]
         ]
         
