@@ -2498,19 +2498,19 @@ class DiceBot:
             await self.handle_game_accept(query, game_id)
         elif data.startswith("decline_"):
             game_id = data.split("_")[1]
-            await self.handle_game_decline(query, game_id)
+            await self.handle_game_decline(query, context, game_id)
         elif data.startswith("blackjack_accept_"):
             game_id = data.split("_")[2]
             await self.handle_blackjack_accept(query, context, game_id)
         elif data.startswith("blackjack_decline_"):
             game_id = data.split("_")[2]
-            await self.handle_blackjack_decline(query, game_id)
+            await self.handle_blackjack_decline(query, context, game_id)
         elif data.startswith("knb_accept_"):
             game_id = data.split("_")[2]
             await self.handle_knb_accept(query, context, game_id)
         elif data.startswith("knb_decline_"):
             game_id = data.split("_")[2]
-            await self.handle_knb_decline(query, game_id)
+            await self.handle_knb_decline(query, context, game_id)
         elif data.startswith("knb_choice_"):
             # Формат: knb_choice_{game_id}_{choice}
             parts = data.split("_")
@@ -3360,7 +3360,7 @@ class DiceBot:
         else:
             await self._edit_query_message(query, "❌ Ошибка при создании счетов!")
             
-    async def handle_game_decline(self, query, game_id: str):
+    async def handle_game_decline(self, query, context: ContextTypes.DEFAULT_TYPE, game_id: str):
         """Обработка отклонения игры"""
         if game_id not in self.active_games:
             await self._edit_query_message(query, "❌ Игра не найдена!")
@@ -3377,7 +3377,7 @@ class DiceBot:
         # Возвращаем ставки, если они были оплачены
         refund_messages = []
         await self._update_duel_invoice_messages_status(
-            query.bot,
+            context.bot,
             game,
             (
                 f"❌ <b>Матч отменён</b>\n\n"
@@ -3401,7 +3401,7 @@ class DiceBot:
             if success:
                 # Отправляем чек в ЛС игроку
                 try:
-                    await query.bot.send_message(
+                    await context.bot.send_message(
                         game.challenger.id,
                         f"💰 <b>Возврат ставки</b>\n\n"
                         f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
@@ -3426,7 +3426,7 @@ class DiceBot:
             if success:
                 # Отправляем чек в ЛС игроку
                 try:
-                    await query.bot.send_message(
+                    await context.bot.send_message(
                         game.target_user.id,
                         f"💰 <b>Возврат ставки</b>\n\n"
                         f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
@@ -3561,7 +3561,7 @@ class DiceBot:
         )
         await self._upsert_state_event("blackjack_invoice_messages_sent")
 
-    async def handle_blackjack_decline(self, query, game_id: str):
+    async def handle_blackjack_decline(self, query, context: ContextTypes.DEFAULT_TYPE, game_id: str):
         """Обработка отклонения приглашения на Blackjack"""
         if game_id not in self.active_blackjack_games:
             await query.answer("❌ Игра не найдена!")
@@ -3582,7 +3582,7 @@ class DiceBot:
         # Возвращаем ставки, если они были оплачены
         refund_messages = []
         await self._update_duel_invoice_messages_status(
-            query.bot,
+            context.bot,
             game,
             (
                 f"❌ <b>Blackjack отменён</b>\n\n"
@@ -3605,7 +3605,7 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await query.bot.send_message(
+                    await context.bot.send_message(
                         game.challenger.id,
                         f"💰 <b>Возврат ставки</b>\n\n"
                         f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
@@ -3629,7 +3629,7 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await query.bot.send_message(
+                    await context.bot.send_message(
                         game.target_user.id,
                         f"💰 <b>Возврат ставки</b>\n\n"
                         f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
@@ -3760,7 +3760,7 @@ class DiceBot:
         else:
             await self._edit_query_message(query, "❌ Ошибка при создании счетов!")
     
-    async def handle_knb_decline(self, query, game_id: str):
+    async def handle_knb_decline(self, query, context: ContextTypes.DEFAULT_TYPE, game_id: str):
         """Обработка отклонения приглашения на КНБ"""
         if game_id not in self.active_knb_games:
             await query.answer("❌ Игра не найдена!")
@@ -3781,7 +3781,7 @@ class DiceBot:
         # Возвращаем ставки, если они были оплачены
         refund_messages = []
         await self._update_duel_invoice_messages_status(
-            query.bot,
+            context.bot,
             game,
             (
                 f"❌ <b>КНБ отменён</b>\n\n"
@@ -3804,7 +3804,7 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await query.bot.send_message(
+                    await context.bot.send_message(
                         game.challenger.id,
                         f"💰 <b>Возврат ставки</b>\n\n"
                         f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
@@ -3828,7 +3828,7 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await query.bot.send_message(
+                    await context.bot.send_message(
                         game.target_user.id,
                         f"💰 <b>Возврат ставки</b>\n\n"
                         f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
