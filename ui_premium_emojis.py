@@ -47,7 +47,7 @@ PREMIUM_TEXT_EMOJI = {
     "check_mark": os.getenv("PE_TXT_CHECK_MARK", "5273806972871787310"),
     "bust_in_silhouette": os.getenv("PE_TXT_BUST_IN_SILHOUETTE", "5199445141764475415"),
     "warning": os.getenv("PE_TXT_WARNING", "5269744182917866822"),
-    "wave": os.getenv("PE_TXT_WAVE", ""),
+    "wave": os.getenv("PE_TXT_WAVE", "5388587564380728115"),
     "green_circle": os.getenv("PE_TXT_GREEN_CIRCLE", ""),
     "down_arrow": os.getenv("PE_TXT_DOWN_ARROW", ""),
 
