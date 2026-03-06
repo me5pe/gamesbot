@@ -2,6 +2,7 @@ import random
 from datetime import datetime
 from typing import Optional, Dict, List
 from telegram import User
+from ui_premium_emojis import premium_emoji, premiumize_text
 
 class MultiDiceGame:
     """Класс для мультидуэли (3-5 игроков)"""
@@ -198,20 +199,22 @@ class MultiDiceGame:
             else:
                 scoreboard += f"@{player.username}: — = <b>{score}</b> ({rolls_count}/{self.dice_count})\n"
             
-        return scoreboard
+        return premiumize_text(scoreboard)
         
     def get_players_list_text(self) -> str:
         """Возвращает список принявших игроков и приглашенных"""
-        text = f"👥 <b>Участники ({len(self.players)}/{self.max_players})</b>\n\n"
+        participants_emoji = premium_emoji("multi_participants", "👥")
+        waiting_emoji = premium_emoji("multi_waiting", "⚠️")
+        text = f"{participants_emoji} <b>Участники ({len(self.players)}/{self.max_players})</b>\n\n"
 
         for i, player in enumerate(self.players, 1):
             creator_mark = " (создатель)" if player.id == self.creator.id else ""
             text += f"{i}. @{player.username}{creator_mark}\n"
         
         if self.invited_players:
-            text += f"\n⚠️ <b>Ожидание приглашённых игроков:</b>\n"
+            text += f"\n{waiting_emoji} <b>Ожидание приглашённых игроков:</b>\n"
             for player in self.invited_players:
                 text += f"• @{player.username}\n"
 
-        return text
+        return premiumize_text(text)
 

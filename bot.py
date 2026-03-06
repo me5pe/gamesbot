@@ -1258,7 +1258,7 @@ class DiceBot:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "✅ Принять",
+                        "Принять",
                         callback_data=f"accept_{game_id}",
                         api_kwargs=self.message_formatter.build_button_api_kwargs(
                             "success",
@@ -1266,7 +1266,7 @@ class DiceBot:
                         ),
                     ),
                     InlineKeyboardButton(
-                        "❌ Отклонить",
+                        "Отклонить",
                         callback_data=f"decline_{game_id}",
                         api_kwargs=self.message_formatter.build_button_api_kwargs(
                             "danger",
@@ -1370,7 +1370,7 @@ class DiceBot:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "✅ Принять",
+                        "Принять",
                         callback_data=f"blackjack_accept_{game_id}",
                         api_kwargs=self.message_formatter.build_button_api_kwargs(
                             "success",
@@ -1378,7 +1378,7 @@ class DiceBot:
                         ),
                     ),
                     InlineKeyboardButton(
-                        "❌ Отклонить",
+                        "Отклонить",
                         callback_data=f"blackjack_decline_{game_id}",
                         api_kwargs=self.message_formatter.build_button_api_kwargs(
                             "danger",
@@ -1506,7 +1506,7 @@ class DiceBot:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "✅ Принять",
+                        "Принять",
                         callback_data=f"knb_accept_{game_id}",
                         api_kwargs=self.message_formatter.build_button_api_kwargs(
                             "success",
@@ -1514,7 +1514,7 @@ class DiceBot:
                         ),
                     ),
                     InlineKeyboardButton(
-                        "❌ Отклонить",
+                        "Отклонить",
                         callback_data=f"knb_decline_{game_id}",
                         api_kwargs=self.message_formatter.build_button_api_kwargs(
                             "danger",
@@ -1797,7 +1797,7 @@ class DiceBot:
         buttons = [
             [
                 InlineKeyboardButton(
-                    "✅ Принять предложение",
+                    "Принять предложение",
                     callback_data=f"multi_join_{game.game_id}",
                     api_kwargs=self.message_formatter.build_button_api_kwargs(
                         "success",
@@ -1807,7 +1807,7 @@ class DiceBot:
             ],
             [
                 InlineKeyboardButton(
-                    "❌ Отменить мульти-дуэль",
+                    "Отменить мульти-дуэль",
                     callback_data=f"multi_cancel_{game.game_id}",
                     api_kwargs=self.message_formatter.build_button_api_kwargs(
                         "danger",
