@@ -93,6 +93,7 @@ class DiceBot:
         self._webhook_runner: Optional[web.AppRunner] = None
         self._webhook_site: Optional[web.TCPSite] = None
         self._processed_crypto_updates: Set[int] = set()
+        self._processed_paid_invoices: Set[str] = set()
         self.db = DatabaseManager()
         self._cryptobot_webhook_host = os.getenv("CRYPTOBOT_WEBHOOK_HOST", "0.0.0.0")
         self._cryptobot_webhook_port = int(os.getenv("CRYPTOBOT_WEBHOOK_PORT", os.getenv("PORT", "8000")))
@@ -177,12 +178,33 @@ class DiceBot:
         if invoice_id is None:
             return
 
-        await self._apply_invoice_paid(invoice_id)
+        invoice_id_str = str(invoice_id)
+        try:
+            is_new_invoice = await self.db.mark_invoice_processed(invoice_id_str)
+        except Exception as e:
+            logger.error("Ошибка durable idempotency для invoice_id=%s: %s", invoice_id_str, e)
+            # Fallback in-memory, чтобы не потерять защиту от дублей при проблеме с БД.
+            if invoice_id_str in self._processed_paid_invoices:
+                return
+            self._processed_paid_invoices.add(invoice_id_str)
+            if len(self._processed_paid_invoices) > 5000:
+                self._processed_paid_invoices = set(list(self._processed_paid_invoices)[-2500:])
+        else:
+            if not is_new_invoice:
+                return
 
-    async def _apply_invoice_paid(self, invoice_id: Any):
+        applied = await self._apply_invoice_paid(invoice_id)
+        if not applied:
+            logger.warning(
+                "Оплата invoice_id=%s получена, но активная игра для применения не найдена "
+                "(возможна просроченная/завершенная игра).",
+                invoice_id_str,
+            )
+
+    async def _apply_invoice_paid(self, invoice_id: Any) -> bool:
         """Применяет событие оплаты по invoice_id ко всем активным играм."""
         if not self.application:
-            return
+            return False
 
         invoice_id_str = str(invoice_id)
         context = self.application
@@ -234,7 +256,7 @@ class DiceBot:
                     await self._start_duel_game(context, game)
                 if changed:
                     await self._persist_runtime_state()
-                    return
+                    return True
 
             # Blackjack
             for game in self.active_blackjack_games.values():
@@ -282,7 +304,7 @@ class DiceBot:
                     await self.start_blackjack_game(context, game)
                 if changed:
                     await self._persist_runtime_state()
-                    return
+                    return True
 
             # КНБ
             for game in self.active_knb_games.values():
@@ -343,7 +365,7 @@ class DiceBot:
                     await self._send_knb_choice_menu(game, context)
                 if changed:
                     await self._persist_runtime_state()
-                    return
+                    return True
 
             # Мультиигры
             for game in self.active_multi_games.values():
@@ -376,7 +398,9 @@ class DiceBot:
                             )
                             await self._start_multi_game(context, game)
                         await self._persist_runtime_state()
-                        return
+                        return True
+
+        return False
 
     async def _start_cryptobot_webhook_server(self):
         if self._webhook_runner:
@@ -630,6 +654,103 @@ class DiceBot:
         logger.error("Не удалось отправить сообщение через bot.send_message после %s попыток", max_retries)
         return None
 
+    async def _bot_send_chat_action_with_retry(
+        self,
+        bot,
+        chat_id: int,
+        action: str = "typing",
+        max_retries: int = 3,
+    ) -> bool:
+        """Безопасная отправка chat action с throttling/retry."""
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                await self._throttle_api_call(chat_id=chat_id)
+                await bot.send_chat_action(chat_id=chat_id, action=action)
+                return True
+            except RetryAfter as exc:
+                attempt += 1
+                await asyncio.sleep(exc.retry_after + 0.5)
+            except TimedOut:
+                attempt += 1
+                await asyncio.sleep(1.0 * attempt)
+            except TelegramError as exc:
+                logger.warning("Ошибка Telegram API при send_chat_action: %s", exc)
+                return False
+        return False
+
+    async def _bot_send_dice_with_retry(
+        self,
+        bot,
+        chat_id: int,
+        emoji=DiceEmoji.DICE,
+        max_retries: int = 3,
+    ):
+        """Безопасная отправка кубика через bot.send_dice."""
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                await self._throttle_api_call(chat_id=chat_id)
+                return await bot.send_dice(chat_id=chat_id, emoji=emoji)
+            except RetryAfter as exc:
+                attempt += 1
+                await asyncio.sleep(exc.retry_after + 0.5)
+            except TimedOut:
+                attempt += 1
+                await asyncio.sleep(1.0 * attempt)
+            except TelegramError as exc:
+                logger.warning("Ошибка Telegram API при send_dice: %s", exc)
+                return None
+        return None
+
+    async def _bot_edit_message_with_retry(
+        self,
+        bot,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        reply_markup=None,
+        parse_mode=ParseMode.HTML,
+        as_caption: bool = False,
+        max_retries: int = 3,
+    ) -> bool:
+        """Безопасное редактирование сообщения/подписи с throttling/retry."""
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                await self._throttle_api_call(chat_id=chat_id)
+                if as_caption:
+                    await bot.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        caption=text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                else:
+                    await bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                return True
+            except RetryAfter as exc:
+                attempt += 1
+                await asyncio.sleep(exc.retry_after + 0.5)
+            except TimedOut:
+                attempt += 1
+                await asyncio.sleep(1.0 * attempt)
+            except BadRequest as exc:
+                if "Message is not modified" not in str(exc):
+                    logger.debug("Не удалось отредактировать сообщение %s/%s: %s", chat_id, message_id, exc)
+                return False
+            except TelegramError as exc:
+                logger.warning("Ошибка Telegram API при edit_message: %s", exc)
+                return False
+        return False
+
     async def send_dice_with_retry(self, chat, max_retries: int = 3):
         """Отправляет кубик с обработкой flood control и таймаутов"""
         retry_count = 0
@@ -706,18 +827,27 @@ class DiceBot:
             f"🃏 @{player_username} вытянул карту {card[0]}{card[1]}.\n"
             f"Текущее количество очков: <b>{score}</b>."
         )
-        try:
-            message = await bot.send_photo(
-                chat_id=chat_id,
-                photo=image,
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
-            )
-            return message
-        except Exception as e:
-            logger.error(f"Не удалось отправить карту игроку @{player_username}: {e}")
-            return None
+        attempt = 0
+        while attempt < 3:
+            try:
+                await self._throttle_api_call(chat_id=chat_id)
+                return await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=image,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
+            except RetryAfter as e:
+                attempt += 1
+                await asyncio.sleep(e.retry_after + 0.5)
+            except TimedOut:
+                attempt += 1
+                await asyncio.sleep(1.0 * attempt)
+            except Exception as e:
+                logger.error(f"Не удалось отправить карту игроку @{player_username}: {e}")
+                return None
+        return None
     
     def format_blackjack_scoreboard(self, game: BlackjackGame, reveal_all: bool = False) -> str:
         """Форматирует табло Blackjack. Если reveal_all=False, скрывает карты и очки соперника."""
@@ -935,9 +1065,10 @@ class DiceBot:
         try:
             keyboard = self.build_blackjack_keyboard(game)
             cards_text = ", ".join([f"{c[0]}{c[1]}" for c in player.cards]) or "нет карт"
-            await bot.send_message(
-                chat_id=player.user.id,
-                text=(
+            await self._bot_send_message_with_retry(
+                bot,
+                player.user.id,
+                (
                     f"🃏 <b>Ваша очередь в Blackjack {game.game_id[:6]}</b>\n\n"
                     f"Ваши карты: {cards_text}\n"
                     f"Очки: <b>{player.score}</b>\n\n"
@@ -948,7 +1079,8 @@ class DiceBot:
             )
         except Exception as e:
             logger.error(f"Не удалось отправить ход игроку @{player.user.username}: {e}")
-            await context.bot.send_message(
+            await self._bot_send_message_with_retry(
+                context.bot,
                 game.chat_id,
                 f"⚠️ @{player.user.username}, откройте ЛС с ботом и нажмите «Старт/Start».",
                 parse_mode=ParseMode.HTML
@@ -1016,8 +1148,8 @@ class DiceBot:
         if update.effective_chat.type != "private":
             # Убираем клавиатуру из группового чата
             await update.message.reply_text(
-                "❌ Старт/Start работает только в личных сообщениях с ботом.\n"
-                "Напишите боту в ЛС для доступа к меню.",
+                "❌ <b>Старт/Start доступен только в ЛС с ботом.</b>\n"
+                "Напишите боту в личные сообщения, чтобы открыть меню.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=ReplyKeyboardRemove()
             )
@@ -1026,7 +1158,8 @@ class DiceBot:
         await self.show_main_menu(update)
         # Отправляем постоянную клавиатуру только при первом запуске
         await update.message.reply_text(
-            "🎯 Используйте кнопки ниже для навигации по боту!",
+            "🎯 <b>Меню готово.</b>\nИспользуйте кнопки ниже для навигации.",
+            parse_mode=ParseMode.HTML,
             reply_markup=get_main_keyboard(update.effective_user.id)
         )
     
@@ -1036,14 +1169,16 @@ class DiceBot:
         if update.effective_chat.type != "private":
             # Убираем клавиатуру из группового чата
             await update.message.reply_text(
-                "❌ Команда /refresh работает только в личных сообщениях с ботом.",
+                "❌ <b>Команда /refresh доступна только в ЛС с ботом.</b>",
+                parse_mode=ParseMode.HTML,
                 reply_markup=ReplyKeyboardRemove()
             )
             return
         
         user_id = update.effective_user.id
         await update.message.reply_text(
-            "🔄 Клавиатура обновлена!",
+            "🔄 <b>Клавиатура обновлена.</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=get_main_keyboard(user_id)
         )
         
@@ -1055,6 +1190,7 @@ class DiceBot:
             (
             f"🎲 <b>Illidan Games</b>\n\n"
             f"👋 Добро пожаловать, <b>@{user.username}</b>!\n\n"
+            f"💬 <i>«Честная игра — красивый результат.»</i>\n\n"
             f"📊 <b>Статус системы</b>\n"
             f"🟢 Работает в штатном режиме\n"
             f"💰 Валюта: <b>USDT</b>\n"
@@ -1170,7 +1306,7 @@ class DiceBot:
         # Проверяем наличие аргументов
         if not context.args or len(context.args) < 1:
             await update.message.reply_text(
-                "❌ Неверный формат команды!\n\n"
+                "❌ Неверный формат команды.\n\n"
                 "Вариант 1: /duel <сумма> [кол-во_кубиков] @username\n"
                 "Вариант 2: Ответьте на сообщение пользователя: /duel <сумма> [кол-во_кубиков]\n\n"
                 "Пример: /duel 1 @username\n"
@@ -1183,11 +1319,11 @@ class DiceBot:
             bet_amount = float(context.args[0])
             
             if bet_amount < MIN_BET:
-                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT!")
+                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT.")
                 return
             
             if bet_amount > MAX_BET:
-                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT!")
+                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT.")
                 return
             
             # Определяем количество кубиков (от 1 до 3) и target username
@@ -1212,11 +1348,11 @@ class DiceBot:
                 target_username = target_user.username
                 
                 if not target_username:
-                    await update.message.reply_text("❌ У пользователя нет username!")
+                    await update.message.reply_text("❌ У пользователя не указан username.")
                     return
                     
                 if target_user.is_bot:
-                    await update.message.reply_text("❌ Нельзя играть с ботом!")
+                    await update.message.reply_text("❌ Нельзя играть с ботом.")
                     return
                     
                 logger.info(f"Дуэль по ответу на сообщение с @{target_username} (dice_count={dice_count})")
@@ -1319,7 +1455,7 @@ class DiceBot:
             await update.message.reply_text("❌ Неверная сумма ставки!")
         except Exception as e:
             logger.error(f"Ошибка в команде duel: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при создании игры!")
+            await update.message.reply_text("❌ Не удалось создать игру. Попробуйте позже.")
 
     async def blackjack_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Создание дуэли в 21 очко"""
@@ -1337,11 +1473,11 @@ class DiceBot:
         try:
             bet_amount = float(context.args[0])
             if bet_amount < MIN_BET:
-                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT!")
+                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT.")
                 return
             
             if bet_amount > MAX_BET:
-                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT!")
+                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT.")
                 return
             
             target_username = None
@@ -1351,10 +1487,10 @@ class DiceBot:
                 target_user = update.message.reply_to_message.from_user
                 target_username = target_user.username
                 if not target_username:
-                    await update.message.reply_text("❌ У пользователя нет username!")
+                    await update.message.reply_text("❌ У пользователя не указан username.")
                     return
                 if target_user.is_bot:
-                    await update.message.reply_text("❌ Нельзя играть с ботом!")
+                    await update.message.reply_text("❌ Нельзя играть с ботом.")
                     return
             elif len(context.args) >= 2:
                 target_username = context.args[1].replace("@", "")
@@ -1366,7 +1502,7 @@ class DiceBot:
             
             challenger = update.effective_user
             if challenger.username == target_username:
-                await update.message.reply_text("❌ Нельзя играть с самим собой!")
+                await update.message.reply_text("❌ Нельзя играть с самим собой.")
                 return
             
             game_id = str(uuid.uuid4())[:8]
@@ -1472,11 +1608,11 @@ class DiceBot:
         try:
             bet_amount = float(context.args[0])
             if bet_amount < MIN_BET:
-                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT!")
+                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT.")
                 return
             
             if bet_amount > MAX_BET:
-                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT!")
+                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT.")
                 return
             
             target_username = None
@@ -1486,10 +1622,10 @@ class DiceBot:
                 target_user = update.message.reply_to_message.from_user
                 target_username = target_user.username
                 if not target_username:
-                    await update.message.reply_text("❌ У пользователя нет username!")
+                    await update.message.reply_text("❌ У пользователя не указан username.")
                     return
                 if target_user.is_bot:
-                    await update.message.reply_text("❌ Нельзя играть с ботом!")
+                    await update.message.reply_text("❌ Нельзя играть с ботом.")
                     return
             elif len(context.args) >= 2:
                 target_username = context.args[1].replace("@", "")
@@ -1501,7 +1637,7 @@ class DiceBot:
             
             challenger = update.effective_user
             if challenger.username == target_username:
-                await update.message.reply_text("❌ Нельзя играть с самим собой!")
+                await update.message.reply_text("❌ Нельзя играть с самим собой.")
                 return
             
             game_id = str(uuid.uuid4())[:8]
@@ -1604,7 +1740,7 @@ class DiceBot:
         
         if not context.args or len(context.args) < 2:
             await update.message.reply_text(
-                "❌ Неверный формат команды!\n\n"
+                "❌ Неверный формат команды.\n\n"
                 "<b>Формат 1 (старый):</b>\n"
                 "/multiduel &lt;ставка&gt; &lt;количество_игроков&gt; &lt;количество_кубиков&gt;\n"
                 "Пример: /multiduel 1 4 2\n\n"
@@ -1623,11 +1759,11 @@ class DiceBot:
             
             # Проверки ставки
             if bet_amount < MIN_BET:
-                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT!")
+                await update.message.reply_text(f"❌ Минимальная ставка: {MIN_BET} USDT.")
                 return
             
             if bet_amount > MAX_BET:
-                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT!")
+                await update.message.reply_text(f"❌ Максимальная ставка: {MAX_BET} USDT.")
                 return
             
             creator = update.effective_user
@@ -1755,7 +1891,7 @@ class DiceBot:
                 # Старый формат: /multiduel <ставка> <количество_игроков> <количество_кубиков>
                 if len(context.args) < 3:
                     await update.message.reply_text(
-                        "❌ Неверный формат команды!\n\n"
+                        "❌ Неверный формат команды.\n\n"
                         "Используйте: /multiduel &lt;ставка&gt; &lt;игроки&gt; &lt;кубики&gt;\n\n"
                         "&lt;ставка&gt; - сумма ставки\n"
                         "&lt;игроки&gt; - количество игроков (3-5)\n"
@@ -1814,7 +1950,7 @@ class DiceBot:
             await update.message.reply_text("❌ Неверный формат чисел!")
         except Exception as e:
             logger.error(f"Ошибка в команде multiduel: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при создании мультиигры!")
+            await update.message.reply_text("❌ Не удалось создать мультиигру. Попробуйте позже.")
     
     def _build_multi_game_keyboard(self, game: MultiDiceGame) -> InlineKeyboardMarkup:
         buttons = [
@@ -1866,21 +2002,25 @@ class DiceBot:
             
             reply_markup = self._build_multi_game_keyboard(game)
             
-            edit_kwargs = dict(
-                chat_id=game.chat_id,
-                message_id=game.message_id,
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML,
-            )
             if game.message_has_photo:
-                await bot.edit_message_caption(
-                    caption=search_text,
-                    **edit_kwargs,
+                await self._bot_edit_message_with_retry(
+                    bot=bot,
+                    chat_id=game.chat_id,
+                    message_id=game.message_id,
+                    text=search_text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML,
+                    as_caption=True,
                 )
             else:
-                await bot.edit_message_text(
+                await self._bot_edit_message_with_retry(
+                    bot=bot,
+                    chat_id=game.chat_id,
+                    message_id=game.message_id,
                     text=search_text,
-                    **edit_kwargs,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML,
+                    as_caption=False,
                 )
             return True
         except Exception as e:
@@ -1896,7 +2036,7 @@ class DiceBot:
         
         if not context.args or len(context.args) < 1:
             await update.message.reply_text(
-                "❌ Неверный формат команды!\n\n"
+                "❌ Неверный формат команды.\n\n"
                 "Используйте: /multiduelkick @username\n\n"
                 "Пример: /multiduelkick @player1"
             )
@@ -1950,7 +2090,7 @@ class DiceBot:
                 
         except Exception as e:
             logger.error(f"Ошибка в команде multiduelkick: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при удалении игрока!")
+            await update.message.reply_text("❌ Не удалось удалить игрока. Попробуйте позже.")
     
     async def invitem_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /invitem для приглашения игрока в мультидуэль (только создатель)"""
@@ -1961,7 +2101,7 @@ class DiceBot:
         
         if not context.args or len(context.args) < 1:
             await update.message.reply_text(
-                "❌ Неверный формат команды!\n\n"
+                "❌ Неверный формат команды.\n\n"
                 "Используйте: /invitem @username\n\n"
                 "Пример: /invitem @player1"
             )
@@ -2027,12 +2167,15 @@ class DiceBot:
                     
                     # Уведомляем приглашенного игрока
                     try:
-                        await bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            bot,
                             user.id,
-                            f"📩 Вас пригласили в мультидуэль!\n\n"
-                            f"Ставка: {active_multi_game.bet_amount} USDT\n"
-                            f"Кубиков: {active_multi_game.dice_count}\n\n"
-                            f"Вернитесь в чат и нажмите кнопку «Принять предложение».",
+                            (
+                                f"📩 Вас пригласили в мультидуэль!\n\n"
+                                f"Ставка: {active_multi_game.bet_amount} USDT\n"
+                                f"Кубиков: {active_multi_game.dice_count}\n\n"
+                                f"Вернитесь в чат и нажмите кнопку «Принять предложение»."
+                            ),
                             parse_mode=ParseMode.HTML
                         )
                     except Exception as e:
@@ -2049,7 +2192,7 @@ class DiceBot:
                 
         except Exception as e:
             logger.error(f"Ошибка в команде invitem: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при приглашении игрока!")
+            await update.message.reply_text("❌ Не удалось пригласить игрока. Попробуйте позже.")
             
 
 
@@ -2082,11 +2225,14 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.challenger.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML,
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.challenger.username} в ЛС")
@@ -2106,11 +2252,14 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.target_user.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML,
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.target_username} в ЛС")
@@ -2170,11 +2319,14 @@ class DiceBot:
                     self.check_manager.add_check(check_data)
                 if success:
                     try:
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             player.id,
-                            f"💰 <b>Возврат ставки</b>\n\n"
-                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                            f"Чек для получения:\n{check_link}",
+                            (
+                                f"💰 <b>Возврат ставки</b>\n\n"
+                                f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                                f"Чек для получения:\n{check_link}"
+                            ),
                             parse_mode=ParseMode.HTML,
                         )
                         refund_messages.append(f"✅ Чек отправлен @{player.username} в ЛС")
@@ -2235,10 +2387,10 @@ class DiceBot:
                     self.check_manager.add_check(check_data)
                 if success:
                     try:
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             player.id,
-                            f"💰 <b>Возврат ставки</b>\n\n"
-                            f"Чек: {check_link}",
+                            f"💰 <b>Возврат ставки</b>\n\nЧек: {check_link}",
                             parse_mode=ParseMode.HTML
                         )
                         refund_messages.append(f"✅ Чек отправлен @{player.username}")
@@ -2261,7 +2413,7 @@ class DiceBot:
         )
         if refund_messages:
             text += "\n\n" + "\n".join(refund_messages)
-        await context.bot.send_message(game.chat_id, text, parse_mode=ParseMode.HTML)
+        await self._bot_send_message_with_retry(context.bot, game.chat_id, text, parse_mode=ParseMode.HTML)
     
     async def _cancel_knb_game(self, game: RockPaperScissorsGame, context: ContextTypes.DEFAULT_TYPE, reason: str = "администратором"):
         """Отменяет игру КНБ с возвратом ставок"""
@@ -2292,10 +2444,10 @@ class DiceBot:
                     self.check_manager.add_check(check_data)
                 if success:
                     try:
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             player.id,
-                            f"💰 <b>Возврат ставки</b>\n\n"
-                            f"Чек: {check_link}",
+                            f"💰 <b>Возврат ставки</b>\n\nЧек: {check_link}",
                             parse_mode=ParseMode.HTML
                         )
                         refund_messages.append(f"✅ Чек отправлен @{player.username}")
@@ -2318,7 +2470,7 @@ class DiceBot:
         )
         if refund_messages:
             text += "\n\n" + "\n".join(refund_messages)
-        await context.bot.send_message(game.chat_id, text, parse_mode=ParseMode.HTML)
+        await self._bot_send_message_with_retry(context.bot, game.chat_id, text, parse_mode=ParseMode.HTML)
     
     async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /cancel (только для администратора)
@@ -2333,7 +2485,7 @@ class DiceBot:
         # Проверяем аргументы
         if not context.args:
             await update.message.reply_text(
-                "❌ Неверный формат команды!\n\n"
+                "❌ Неверный формат команды.\n\n"
                 "Используйте: /cancel <код_игры>\n\n"
                 "Код игры можно посмотреть в админ-панели в разделе «Активные игры» "
                 "(например: 73c661)."
@@ -2562,7 +2714,8 @@ class DiceBot:
     async def update_user_keyboard(self, chat_id: int, user_id: int, bot):
         """Обновляет клавиатуру пользователя, отправляя новое сообщение"""
         try:
-            await bot.send_message(
+            await self._bot_send_message_with_retry(
+                bot,
                 chat_id,
                 "Используйте кнопки ниже",
                 reply_markup=get_main_keyboard(user_id)
@@ -2622,7 +2775,8 @@ class DiceBot:
             for target_id in self.registered_users:
                 try:
                     if is_plain_text:
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             target_id,
                             broadcast_text,
                             parse_mode=ParseMode.HTML
@@ -3156,12 +3310,13 @@ class DiceBot:
         
         # Проверяем, что игрок написал /start в ЛС бота
         bot = query.message.get_bot()
-        try:
-            await bot.send_chat_action(user.id, "typing")
-        except Exception as e:
+        can_dm_user = await self._bot_send_chat_action_with_retry(bot, user.id, "typing")
+        if not can_dm_user:
+            e = "chat action недоступен"
             logger.warning(f"Игрок @{user.username} не написал /start в ЛС бота: {e}")
             # Отправляем уведомление в чат
-            await query.message.chat.send_message(
+            await self._send_message_with_retry(
+                query.message.chat,
                 f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
                 f"Потом вернитесь сюда и нажмите «Принять предложение» ещё раз.",
                 parse_mode=ParseMode.HTML
@@ -3200,21 +3355,23 @@ class DiceBot:
                         invoice_text = (
                             f"💰 <b>Мульти-куб {game_id[:6]}</b>\n\n"
                             f"Ставка: <b>{game.bet_amount} USDT</b>\n"
-                            f"Игроков: {game.max_players}\n"
-                            f"Кубиков: {game.dice_count}\n\n"
-                            f"Оплатите участие в течение 5 мин.\n"
-                            f"После оплаты бот подтвердит её автоматически."
+                            f"Игроков: <b>{game.max_players}</b>\n"
+                            f"Кубиков: <b>{game.dice_count}</b>\n\n"
+                            f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                            f"✅ Подтверждение оплаты происходит автоматически."
                         )
                         
                         keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=payment_info['pay_url'])]]
                         
-                        sent_message = await bot.send_message(
+                        sent_message = await self._bot_send_message_with_retry(
+                            bot,
                             player.id,
                             invoice_text,
                             reply_markup=InlineKeyboardMarkup(keyboard),
                             parse_mode=ParseMode.HTML
                         )
-                        game.players_invoice_message_ids[player.id] = sent_message.message_id
+                        if sent_message:
+                            game.players_invoice_message_ids[player.id] = sent_message.message_id
                     except Exception as e:
                         logger.error(f"Ошибка отправки счета игроку {player.username}: {e}")
             await self._upsert_state_event("multi_invoices_created")
@@ -3232,7 +3389,7 @@ class DiceBot:
             return
         
         cancel_text = await self._cancel_multi_game(game, context, cancelled_by_creator=True)
-        await context.bot.send_message(game.chat_id, cancel_text, parse_mode=ParseMode.HTML)
+        await self._bot_send_message_with_retry(context.bot, game.chat_id, cancel_text, parse_mode=ParseMode.HTML)
         await query.answer("✅ Мульти-дуэль отменена")
     
     async def handle_game_accept(self, query, game_id: str):
@@ -3260,12 +3417,13 @@ class DiceBot:
         ]
         
         for role, user in users_to_check:
-            try:
-                await bot.send_chat_action(user.id, "typing")
-            except Exception as e:
+            can_dm_user = await self._bot_send_chat_action_with_retry(bot, user.id, "typing")
+            if not can_dm_user:
+                e = "chat action недоступен"
                 logger.warning(f"Игрок @{user.username} не написал /start боту в ЛС: {e}")
                 # Отправляем инструкцию в чат
-                await query.message.chat.send_message(
+                await self._send_message_with_retry(
+                    query.message.chat,
                     f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
                     f"Потом вернитесь сюда и нажмите «Принять вызов» ещё раз.",
                     parse_mode=ParseMode.HTML
@@ -3307,19 +3465,21 @@ class DiceBot:
                     f"Ставка: <b>{game.bet_amount} USDT</b>\n"
                     f"Списано: 0.00\n"
                     f"К оплате: <b>{game.bet_amount} USDT</b>\n\n"
-                    f"Оплатите участие в течение 5 мин.\n"
-                    f"После оплаты бот подтвердит её автоматически."
+                    f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                    f"✅ Подтверждение оплаты происходит автоматически."
                 )
                 
                 keyboard_challenger = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=challenger_payment['pay_url'])]]
                 
-                challenger_invoice_msg = await bot.send_message(
+                challenger_invoice_msg = await self._bot_send_message_with_retry(
+                    bot,
                     game.challenger.id,
                     challenger_invoice_text,
                     reply_markup=InlineKeyboardMarkup(keyboard_challenger),
                     parse_mode=ParseMode.HTML
                 )
-                game.challenger_invoice_message_id = challenger_invoice_msg.message_id
+                if challenger_invoice_msg:
+                    game.challenger_invoice_message_id = challenger_invoice_msg.message_id
                 
                 # Счет для target в ЛС
                 target_invoice_text = (
@@ -3327,24 +3487,27 @@ class DiceBot:
                     f"Ставка: <b>{game.bet_amount} USDT</b>\n"
                     f"Списано: 0.00\n"
                     f"К оплате: <b>{game.bet_amount} USDT</b>\n\n"
-                    f"Оплатите участие в течение 5 мин.\n"
-                    f"После оплаты бот подтвердит её автоматически."
+                    f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                    f"✅ Подтверждение оплаты происходит автоматически."
                 )
                 
                 keyboard_target = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=target_payment['pay_url'])]]
                 
-                target_invoice_msg = await bot.send_message(
+                target_invoice_msg = await self._bot_send_message_with_retry(
+                    bot,
                     game.target_user.id,
                     target_invoice_text,
                     reply_markup=InlineKeyboardMarkup(keyboard_target),
                     parse_mode=ParseMode.HTML
                 )
-                game.target_invoice_message_id = target_invoice_msg.message_id
+                if target_invoice_msg:
+                    game.target_invoice_message_id = target_invoice_msg.message_id
                 
                 # В чате показываем уведомление
                 chat_notification = (
                     f"📋 <b>Оплаты запрошены</b>\n\n"
-                    f"Откройте ЛС с ботом. Оплатите счёт для игры!"
+                    f"Откройте ЛС с ботом и оплатите счёт.\n"
+                    f"💬 <i>После оплаты игра начнётся автоматически.</i>"
                 )
                 
                 await self._edit_query_message(
@@ -3401,11 +3564,14 @@ class DiceBot:
             if success:
                 # Отправляем чек в ЛС игроку
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.challenger.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.challenger.username} в ЛС")
@@ -3426,11 +3592,14 @@ class DiceBot:
             if success:
                 # Отправляем чек в ЛС игроку
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.target_user.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.target_username} в ЛС")
@@ -3478,12 +3647,13 @@ class DiceBot:
         ]
         
         for role, user in users_to_check:
-            try:
-                await bot.send_chat_action(user.id, "typing")
-            except Exception as e:
+            can_dm_user = await self._bot_send_chat_action_with_retry(bot, user.id, "typing")
+            if not can_dm_user:
+                e = "chat action недоступен"
                 logger.warning(f"Игрок @{user.username} не написал /start боту в ЛС: {e}")
                 # Отправляем инструкцию в чат
-                await query.message.chat.send_message(
+                await self._send_message_with_retry(
+                    query.message.chat,
                     f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
                     f"Потом вернитесь сюда и нажмите «Принять» ещё раз.",
                     parse_mode=ParseMode.HTML
@@ -3520,35 +3690,39 @@ class DiceBot:
         
         try:
             keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=challenger_invoice["pay_url"])]]
-            challenger_invoice_msg = await context.bot.send_message(
-                chat_id=game.challenger.id,
-                text=(
+            challenger_invoice_msg = await self._bot_send_message_with_retry(
+                context.bot,
+                game.challenger.id,
+                (
                     f"🃏 <b>Blackjack {game_id[:6]}</b>\n\n"
-                    f"Ставка: {game.bet_amount} USDT\n"
-                    f"Оплатите участие в течение 5 минут.\n"
-                    f"После оплаты бот подтвердит её автоматически."
+                    f"Ставка: <b>{game.bet_amount} USDT</b>\n\n"
+                    f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                    f"✅ Подтверждение оплаты происходит автоматически."
                 ),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.HTML
             )
-            game.challenger_invoice_message_id = challenger_invoice_msg.message_id
+            if challenger_invoice_msg:
+                game.challenger_invoice_message_id = challenger_invoice_msg.message_id
         except Exception as e:
             logger.error(f"Ошибка отправки счета игроку {game.challenger.username}: {e}")
 
         try:
             keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=target_invoice["pay_url"])]]
-            target_invoice_msg = await context.bot.send_message(
-                chat_id=game.target_user.id,
-                text=(
+            target_invoice_msg = await self._bot_send_message_with_retry(
+                context.bot,
+                game.target_user.id,
+                (
                     f"🃏 <b>Blackjack {game_id[:6]}</b>\n\n"
-                    f"Ставка: {game.bet_amount} USDT\n"
-                    f"Оплатите участие в течение 5 минут.\n"
-                    f"После оплаты бот подтвердит её автоматически."
+                    f"Ставка: <b>{game.bet_amount} USDT</b>\n\n"
+                    f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                    f"✅ Подтверждение оплаты происходит автоматически."
                 ),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.HTML
             )
-            game.target_invoice_message_id = target_invoice_msg.message_id
+            if target_invoice_msg:
+                game.target_invoice_message_id = target_invoice_msg.message_id
         except Exception as e:
             logger.error(f"Ошибка отправки счета игроку {game.target_username}: {e}")
         
@@ -3605,11 +3779,14 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.challenger.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.challenger.username} в ЛС")
@@ -3629,11 +3806,14 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.target_user.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.target_username} в ЛС")
@@ -3682,12 +3862,13 @@ class DiceBot:
         ]
         
         for role, user in users_to_check:
-            try:
-                await bot.send_chat_action(user.id, "typing")
-            except Exception as e:
+            can_dm_user = await self._bot_send_chat_action_with_retry(bot, user.id, "typing")
+            if not can_dm_user:
+                e = "chat action недоступен"
                 logger.warning(f"Игрок @{user.username} не написал /start боту в ЛС: {e}")
                 # Отправляем инструкцию в чат
-                await query.message.chat.send_message(
+                await self._send_message_with_retry(
+                    query.message.chat,
                     f"⚠️ @{user.username}, сначала нажмите «Старт/Start» в ЛС с ботом.\n"
                     f"Потом вернитесь сюда и нажмите «Принять» ещё раз.",
                     parse_mode=ParseMode.HTML
@@ -3720,33 +3901,37 @@ class DiceBot:
             try:
                 # Отправляем счет инициатору
                 keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=challenger_payment['pay_url'])]]
-                challenger_invoice_msg = await context.bot.send_message(
-                    chat_id=game.challenger.id,
-                    text=(
+                challenger_invoice_msg = await self._bot_send_message_with_retry(
+                    context.bot,
+                    game.challenger.id,
+                    (
                         f"🗿📄✂️ <b>КНБ {game_id[:6]}</b>\n\n"
-                        f"Ставка: {game.bet_amount} USDT\n"
-                        f"Оплатите участие в течение 5 минут.\n"
-                        f"После оплаты бот подтвердит её автоматически."
+                    f"Ставка: <b>{game.bet_amount} USDT</b>\n\n"
+                    f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                    f"✅ Подтверждение оплаты происходит автоматически."
                     ),
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
                 )
-                game.challenger_invoice_message_id = challenger_invoice_msg.message_id
+                if challenger_invoice_msg:
+                    game.challenger_invoice_message_id = challenger_invoice_msg.message_id
                 
                 # Отправляем счет оппоненту
                 keyboard = [[InlineKeyboardButton("💳 Оплатить в @CryptoBot", url=target_payment['pay_url'])]]
-                target_invoice_msg = await context.bot.send_message(
-                    chat_id=game.target_user.id,
-                    text=(
+                target_invoice_msg = await self._bot_send_message_with_retry(
+                    context.bot,
+                    game.target_user.id,
+                    (
                         f"🗿📄✂️ <b>КНБ {game_id[:6]}</b>\n\n"
-                        f"Ставка: {game.bet_amount} USDT\n"
-                        f"Оплатите участие в течение 5 минут.\n"
-                        f"После оплаты бот подтвердит её автоматически."
+                    f"Ставка: <b>{game.bet_amount} USDT</b>\n\n"
+                    f"🕒 Оплатите участие в течение <b>5 минут</b>.\n"
+                    f"✅ Подтверждение оплаты происходит автоматически."
                     ),
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode=ParseMode.HTML
                 )
-                game.target_invoice_message_id = target_invoice_msg.message_id
+                if target_invoice_msg:
+                    game.target_invoice_message_id = target_invoice_msg.message_id
             except Exception as e:
                 logger.error(f"Ошибка отправки счета: {e}")
             
@@ -3804,11 +3989,14 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.challenger.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.challenger.username} в ЛС")
@@ -3828,11 +4016,14 @@ class DiceBot:
                 self.check_manager.add_check(check_data)
             if success:
                 try:
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.target_user.id,
-                        f"💰 <b>Возврат ставки</b>\n\n"
-                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                        f"Чек для получения:\n{check_link}",
+                        (
+                            f"💰 <b>Возврат ставки</b>\n\n"
+                            f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                            f"Чек для получения:\n{check_link}"
+                        ),
                         parse_mode=ParseMode.HTML
                     )
                     refund_messages.append(f"✅ Чек отправлен @{game.target_username} в ЛС")
@@ -3964,10 +4155,11 @@ class DiceBot:
         await query.answer(f"✅ Вы выбрали: {choice_emoji} {choice_name}")
         
         # Обновляем сообщение в ЛС
-        await query.edit_message_text(
+        await self._edit_query_message(
+            query,
             f"✅ Вы выбрали: {choice_emoji} <b>{choice_name}</b>\n\n"
             f"Ожидание выбора соперника...",
-            parse_mode=ParseMode.HTML
+            reply_markup=None,
         )
         
         # Если оба игрока сделали выбор - обрабатываем раунд
@@ -3982,9 +4174,10 @@ class DiceBot:
         result_text = game.format_round_result(round_result)
         
         # Отправляем результат раунда в чат
-        await context.bot.send_message(
-            chat_id=game.chat_id,
-            text=result_text,
+        await self._bot_send_message_with_retry(
+            context.bot,
+            game.chat_id,
+            result_text,
             parse_mode=ParseMode.HTML
         )
         
@@ -4021,9 +4214,10 @@ class DiceBot:
             else:
                 result_text += "❌ Ошибка при выплате. Обратитесь к администратору."
             
-            await context.bot.send_message(
-                chat_id=game.chat_id,
-                text=result_text,
+            await self._bot_send_message_with_retry(
+                context.bot,
+                game.chat_id,
+                result_text,
                 parse_mode=ParseMode.HTML
             )
             if check_link:
@@ -4066,9 +4260,10 @@ class DiceBot:
         
         # Отправляем меню обоим игрокам
         try:
-            await context.bot.send_message(
-                chat_id=game.challenger.id,
-                text=menu_text,
+            await self._bot_send_message_with_retry(
+                context.bot,
+                game.challenger.id,
+                menu_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.HTML
             )
@@ -4076,9 +4271,10 @@ class DiceBot:
             logger.error(f"Ошибка отправки меню challenger: {e}")
         
         try:
-            await context.bot.send_message(
-                chat_id=game.target_user.id,
-                text=menu_text,
+            await self._bot_send_message_with_retry(
+                context.bot,
+                game.target_user.id,
+                menu_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.HTML
             )
@@ -4501,7 +4697,8 @@ class DiceBot:
                     query,
                     "💥 Вы перебрали! Ход передан сопернику."
                 )
-                await context.bot.send_message(
+                await self._bot_send_message_with_retry(
+                    context.bot,
                     game.chat_id,
                     f"💥 @{state.user.username} перебрал ({state.score} очков)!",
                     parse_mode=ParseMode.HTML
@@ -4517,7 +4714,8 @@ class DiceBot:
                     query,
                     "🎯 Вы набрали 21 очко! Ход передан сопернику."
                 )
-                await context.bot.send_message(
+                await self._bot_send_message_with_retry(
+                    context.bot,
                     game.chat_id,
                     f"🎯 @{state.user.username} набрал 21 очко!",
                     parse_mode=ParseMode.HTML
@@ -4563,7 +4761,8 @@ class DiceBot:
             await query.message.edit_reply_markup(reply_markup=None)
         except Exception as e:
             logger.warning(f"Не удалось удалить кнопки: {e}")
-        await context.bot.send_message(
+        await self._bot_send_message_with_retry(
+            context.bot,
             game.chat_id,
             f"🛑 @{state.user.username} закончил ход.",
             parse_mode=ParseMode.HTML
@@ -4634,7 +4833,8 @@ class DiceBot:
                 query,
                 "💥 Вы перебрали! Ход передан сопернику."
             )
-            await context.bot.send_message(
+            await self._bot_send_message_with_retry(
+                context.bot,
                 game.chat_id,
                 f"💥 @{state.user.username} перебрал ({state.score} очков)!",
                 parse_mode=ParseMode.HTML
@@ -4652,7 +4852,8 @@ class DiceBot:
                 query,
                 "🎯 Вы набрали 21 очко! Ход передан сопернику."
             )
-            await context.bot.send_message(
+            await self._bot_send_message_with_retry(
+                context.bot,
                 game.chat_id,
                 f"🎯 @{state.user.username} набрал 21 очко!",
                 parse_mode=ParseMode.HTML
@@ -4668,7 +4869,8 @@ class DiceBot:
         for player in players:
             if player.is_bust():
                 other = players[0] if players[1] == player else players[1]
-                await context.bot.send_message(
+                await self._bot_send_message_with_retry(
+                    context.bot,
                     game.chat_id,
                     f"💥 @{player.user.username} перебрал ({player.score} очков)!",
                     parse_mode=ParseMode.HTML
@@ -4681,7 +4883,8 @@ class DiceBot:
             return
         current_player = game.players[game.get_current_player_key()]
         # В чате не показываем детали, только уведомление о ходе
-        await context.bot.send_message(
+        await self._bot_send_message_with_retry(
+            context.bot,
             game.chat_id,
             f"🎯 Ход @{current_player.user.username}",
             parse_mode=ParseMode.HTML
@@ -4693,7 +4896,8 @@ class DiceBot:
         await self._upsert_state_event("blackjack_started")
         start_player = game.players[game.get_current_player_key()]
         # В чате не показываем детали, только уведомление о начале
-        await context.bot.send_message(
+        await self._bot_send_message_with_retry(
+            context.bot,
             game.chat_id,
             f"🃏 <b>Blackjack начался!</b>\n\n🎯 Первый ход делает @{start_player.user.username}",
             parse_mode=ParseMode.HTML
@@ -4711,7 +4915,7 @@ class DiceBot:
                 "🤝 <b>Ничья!</b>\n"
                 "🔄 <b>Переигровка</b> — ставки остаются прежними."
             )
-            await context.bot.send_message(game.chat_id, result_text, parse_mode=ParseMode.HTML)
+            await self._bot_send_message_with_retry(context.bot, game.chat_id, result_text, parse_mode=ParseMode.HTML)
             game.reset_for_rematch()
             await self.start_blackjack_game(context, game)
             return
@@ -4730,7 +4934,7 @@ class DiceBot:
         if check_link:
             result_text += f"🔗 Чек: {check_link}"
         
-        await context.bot.send_message(game.chat_id, result_text, parse_mode=ParseMode.HTML)
+        await self._bot_send_message_with_retry(context.bot, game.chat_id, result_text, parse_mode=ParseMode.HTML)
         if check_link:
             await self._mark_payout_notified_completed(game.game_id)
         
@@ -4785,11 +4989,14 @@ class DiceBot:
                         if success:
                             # Отправляем чек в ЛС игроку
                             try:
-                                await context.bot.send_message(
+                                await self._bot_send_message_with_retry(
+                                    context.bot,
                                     game.challenger.id,
-                                    f"💰 <b>Возврат ставки</b>\n\n"
-                                    f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                                    f"Чек для получения:\n{check_link}",
+                                    (
+                                        f"💰 <b>Возврат ставки</b>\n\n"
+                                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                                        f"Чек для получения:\n{check_link}"
+                                    ),
                                     parse_mode=ParseMode.HTML
                                 )
                                 refund_messages.append(f"✅ Чек отправлен @{game.challenger.username} в ЛС")
@@ -4810,11 +5017,14 @@ class DiceBot:
                         if success:
                             # Отправляем чек в ЛС игроку
                             try:
-                                await context.bot.send_message(
+                                await self._bot_send_message_with_retry(
+                                    context.bot,
                                     game.target_user.id,
-                                    f"💰 <b>Возврат ставки</b>\n\n"
-                                    f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
-                                    f"Чек для получения:\n{check_link}",
+                                    (
+                                        f"💰 <b>Возврат ставки</b>\n\n"
+                                        f"Ваша ставка {game.bet_amount} USDT возвращена (с комиссией 3%).\n\n"
+                                        f"Чек для получения:\n{check_link}"
+                                    ),
                                     parse_mode=ParseMode.HTML
                                 )
                                 refund_messages.append(f"✅ Чек отправлен @{game.target_username} в ЛС")
@@ -4830,7 +5040,8 @@ class DiceBot:
                     if refund_messages:
                         expire_text += "\n\n" + "\n".join(refund_messages)
                     
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.chat_id,
                         expire_text,
                         parse_mode=ParseMode.HTML
@@ -4857,7 +5068,8 @@ class DiceBot:
                                 f"Счёт больше неактивен."
                             ),
                         )
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             game.chat_id,
                             "⏰ Оплата не поступила вовремя. Игра отменена.",
                             parse_mode=ParseMode.HTML
@@ -4893,7 +5105,8 @@ class DiceBot:
                                 f"Счёт больше неактивен."
                             ),
                         )
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             game.chat_id,
                             "⏰ Оплата не поступила вовремя. Игра отменена.",
                             parse_mode=ParseMode.HTML
@@ -4943,17 +5156,21 @@ class DiceBot:
                                 self.check_manager.add_check(check_data)
                             if success:
                                 try:
-                                    await context.bot.send_message(
+                                    await self._bot_send_message_with_retry(
+                                        context.bot,
                                         player.id,
-                                        f"💰 <b>Возврат ставки</b>\n\n"
-                                        f"Мультиигра отменена (таймаут).\n"
-                                        f"Чек для получения:\n{check_link}",
+                                        (
+                                            f"💰 <b>Возврат ставки</b>\n\n"
+                                            f"Мультиигра отменена (таймаут).\n"
+                                            f"Чек для получения:\n{check_link}"
+                                        ),
                                         parse_mode=ParseMode.HTML
                                     )
                                 except:
                                     pass
                     
-                    await context.bot.send_message(
+                    await self._bot_send_message_with_retry(
+                        context.bot,
                         game.chat_id,
                         "⏰ Время оплаты истекло. Мультиигра отменена.",
                         parse_mode=ParseMode.HTML
@@ -4992,15 +5209,20 @@ class DiceBot:
                     
                     try:
                         # Уведомляем об AFK
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             game.chat_id,
-                            f"⚠️ @{current_player.username} не сделал ход более 5 минут.\n"
-                            f"Выполняется автоматический бросок...",
+                            (
+                                f"⚠️ @{current_player.username} не сделал ход более 5 минут.\n"
+                                f"Выполняется автоматический бросок..."
+                            ),
                             parse_mode=ParseMode.HTML
                         )
                         
                         # Выполняем автоматический бросок
-                        dice_message = await context.bot.send_dice(game.chat_id)
+                        dice_message = await self._bot_send_dice_with_retry(context.bot, game.chat_id)
+                        if not dice_message:
+                            continue
                         dice_value = dice_message.dice.value
                         
                         # Обрабатываем результат броска
@@ -5072,15 +5294,20 @@ class DiceBot:
                     
                     try:
                         # Уведомляем об AFK
-                        await context.bot.send_message(
+                        await self._bot_send_message_with_retry(
+                            context.bot,
                             game.chat_id,
-                            f"⚠️ @{current_player.username} не сделал ход более 5 минут.\n"
-                            f"Выполняется автоматический бросок...",
+                            (
+                                f"⚠️ @{current_player.username} не сделал ход более 5 минут.\n"
+                                f"Выполняется автоматический бросок..."
+                            ),
                             parse_mode=ParseMode.HTML
                         )
                         
                         # Выполняем автоматический бросок
-                        dice_message = await context.bot.send_dice(game.chat_id)
+                        dice_message = await self._bot_send_dice_with_retry(context.bot, game.chat_id)
+                        if not dice_message:
+                            continue
                         dice_value = dice_message.dice.value
                         
                         # Добавляем результат
@@ -5107,7 +5334,8 @@ class DiceBot:
                                     f"Победители с {max_score} очками:\n{winners_names}\n\n"
                                     f"🔄 <b>Переигровка!</b>"
                                 )
-                                await context.bot.send_message(
+                                await self._bot_send_message_with_retry(
+                                    context.bot,
                                     game.chat_id,
                                     rematch_text,
                                     parse_mode=ParseMode.HTML
@@ -5125,7 +5353,8 @@ class DiceBot:
                                     callback_data=f"multi_roll_{game_id}"
                                 )]]
                                 
-                                await context.bot.send_message(
+                                await self._bot_send_message_with_retry(
+                                    context.bot,
                                     game.chat_id,
                                     scoreboard + f"\n\n🎯 Ход @{next_player.username}",
                                     reply_markup=InlineKeyboardMarkup(keyboard),
@@ -5154,7 +5383,8 @@ class DiceBot:
                                 if check_link:
                                     result_text += f"\n🔗 Чек: {check_link}"
                                 
-                                await context.bot.send_message(
+                                await self._bot_send_message_with_retry(
+                                    context.bot,
                                     game.chat_id,
                                     result_text,
                                     parse_mode=ParseMode.HTML
@@ -5187,7 +5417,8 @@ class DiceBot:
                                 callback_data=f"multi_roll_{game_id}"
                             )]]
                             
-                            await context.bot.send_message(
+                            await self._bot_send_message_with_retry(
+                                context.bot,
                                 game.chat_id,
                                 scoreboard + f"\n\n🎯 Ход @{next_player.username}",
                                 reply_markup=InlineKeyboardMarkup(keyboard),

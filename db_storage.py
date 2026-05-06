@@ -109,6 +109,15 @@ class DatabaseManager:
                 """
             )
 
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS processed_invoices (
+                    invoice_id TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                """
+            )
+
     async def mark_update_processed(self, update_id: int) -> bool:
         """
         Durable idempotency for webhook updates.
@@ -238,3 +247,23 @@ class DatabaseManager:
                 state_key,
             )
             return payload
+
+    async def mark_invoice_processed(self, invoice_id: str) -> bool:
+        """
+        Durable idempotency for paid invoices.
+        Returns True if invoice_id is new, False if already processed.
+        """
+        if not self.pool:
+            raise RuntimeError("PostgreSQL pool не инициализирован.")
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(
+                """
+                INSERT INTO processed_invoices(invoice_id)
+                VALUES($1)
+                ON CONFLICT (invoice_id) DO NOTHING
+                RETURNING invoice_id;
+                """,
+                str(invoice_id),
+            )
+            return result is not None

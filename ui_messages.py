@@ -28,9 +28,10 @@ class MessageFormatter:
         dice_count_emoji = self.get_premium_text_emoji("duel_dice_count", "🎲")
         return (
             f"{invite_emoji} <b>Кубик</b>\n\n"
-            f"@{challenger_username} вызывает @{target_username} на {bet_amount} USDT.\n"
+            f"@{challenger_username} вызывает @{target_username} на дуэль.\n"
+            f"Ставка: <b>{bet_amount} USDT</b>\n"
             f"{dice_count_emoji} Количество кубиков: <b>{dice_text}</b>\n\n"
-            f"Принять?"
+            f"Принять вызов?"
         )
         
         
@@ -38,11 +39,11 @@ class MessageFormatter:
         """Форматирует сообщение с запросом оплаты"""
         return self.premiumize_text(
             (
-            f"📋 <b>Матч {game_id}</b>\n"
-            f"Ставка {bet_amount} USDT.\n"
-            f"Списано: 0.00.\n"
-            f"К оплате: {bet_amount:.2f}.\n"
-            f"Оплатите участие в течение 5 мин."
+            f"📋 <b>Матч {game_id}</b>\n\n"
+            f"Ставка: <b>{bet_amount} USDT</b>\n"
+            f"Списано: 0.00\n"
+            f"К оплате: <b>{bet_amount:.2f} USDT</b>\n\n"
+            f"Оплатите участие в течение 5 минут."
             )
         )
         
@@ -58,11 +59,12 @@ class MessageFormatter:
             # Это MultiDiceGame
             return self.premiumize_text(
                 (
-                f"🎲 <b>Мульти-куб началась!</b>\n\n"
+                f"🎲 <b>Мульти-куб начался!</b>\n\n"
                 f"Участников: {len(game.players)}\n"
                 f"Ставка: {game.bet_amount} USDT\n"
                 f"Кубиков: {game.dice_count}\n\n"
-                f"Каждый игрок делает по {game.dice_count} броска. Победитель - тот, у кого больше очков!"
+                f"Каждый игрок делает по {game.dice_count} броска.\n"
+                f"Побеждает игрок с наибольшей суммой очков."
                 )
             )
         else:
@@ -72,7 +74,8 @@ class MessageFormatter:
                 f"🎲 <b>Игра началась!</b>\n\n"
                 f"@{game.challenger.username} vs @{game.target_username}\n"
                 f"Ставка: {game.bet_amount} USDT\n\n"
-                f"Каждый игрок делает по {getattr(game, 'dice_count', 3)} броска. Победитель - тот, у кого больше очков!"
+                f"Каждый игрок делает по {getattr(game, 'dice_count', 3)} броска.\n"
+                f"Побеждает игрок с наибольшей суммой очков."
                 )
             )
         
@@ -146,7 +149,7 @@ class MessageFormatter:
         return self.premiumize_text(
             (
             f"❌ <b>Игра отменена администратором</b>\n\n"
-            f"Дуэль между @{challenger_username} и @{target_username} была отменена."
+            f"Дуэль между @{challenger_username} и @{target_username} отменена."
             )
         )
         
@@ -208,14 +211,14 @@ class MessageFormatter:
     def format_error_message(self, error_type: str) -> str:
         """Форматирует сообщения об ошибках"""
         error_messages = {
-            "invalid_command": "❌ Неверная команда! Используйте /duel <сумма> @username",
+            "invalid_command": "❌ Неверная команда. Используйте: /duel <сумма> @username",
             "invalid_amount": "❌ Неверная сумма ставки!",
-            "insufficient_funds": "❌ Недостаточно средств для игры!",
+            "insufficient_funds": "❌ Недостаточно средств для участия в игре.",
             "game_not_found": "❌ Игра не найдена!",
             "not_your_turn": "❌ Не ваш ход!",
-            "payment_failed": "❌ Ошибка при обработке платежа!",
-            "payout_failed": "❌ Ошибка при выплате!",
-            "permission_denied": "❌ У вас нет прав для выполнения этой команды!"
+            "payment_failed": "❌ Не удалось обработать оплату. Попробуйте позже.",
+            "payout_failed": "❌ Не удалось выполнить выплату. Обратитесь к администратору.",
+            "permission_denied": "❌ У вас нет прав для выполнения этой команды."
         }
         
         return self.premiumize_text(error_messages.get(error_type, "❌ Произошла неизвестная ошибка!"))
@@ -225,39 +228,40 @@ class MessageFormatter:
         return self.premiumize_text(
             (
             f"❓ <b>Помощь — Illidan Games</b>\n\n"
+            f"💬 <i>«Играйте честно. Играйте красиво.»</i>\n\n"
             f"🎮 <b>Основные команды</b>\n"
-            f"/start - Главное меню\n"
-            f"/duel &lt;сумма&gt; @username - Вызвать игрока на дуэль\n"
-            f"/duel &lt;сумма&gt; (ответ на сообщение) - Вызвать игрока\n"
-            f"/blackjack &lt;сумма&gt; @username - Дуэль в Blackjack (21)\n"
-            f"/knb &lt;сумма&gt; @username - Камень-Ножницы-Бумага\n"
-            f"/multiduel &lt;сумма&gt; &lt;игроки&gt; &lt;кубики&gt; - Создать мультиигру (3-5 игроков)\n"
-            f"/help - Показать это сообщение\n\n"
+            f"• /start — главное меню\n"
+            f"• /duel &lt;сумма&gt; @username — дуэль в кубики\n"
+            f"• /duel &lt;сумма&gt; (ответом) — дуэль по ответу\n"
+            f"• /blackjack &lt;сумма&gt; @username — дуэль в Blackjack\n"
+            f"• /knb &lt;сумма&gt; @username — Камень-Ножницы-Бумага\n"
+            f"• /multiduel &lt;сумма&gt; &lt;игроки&gt; &lt;кубики&gt; — мультиигра (3–5 игроков)\n"
+            f"• /help — это сообщение\n\n"
             f"📋 <b>Правила игр</b>\n\n"
             f"🎲 <b>Кубики:</b>\n"
-            f"• 3 броска на игрока\n"
-            f"• Побеждает большая сумма\n"
+            f"• 1–3 броска на игрока\n"
+            f"• Побеждает наибольшая сумма\n"
             f"• При ничьей — переигровка\n\n"
             f"🃏 <b>Blackjack:</b>\n"
             f"• Цель: набрать 21 очко\n"
-            f"• Ближе к 21 — победа\n"
+            f"• Побеждает тот, кто ближе к 21\n"
             f"• Перебор — проигрыш\n\n"
             f"🗿📄✂️ <b>КНБ:</b>\n"
             f"• Игра до 3 побед\n"
             f"• При ничьей — переигровка раунда\n\n"
             f"🎲 <b>Мульти-дуэли:</b>\n"
             f"• 3-5 игроков\n"
-            f"• Настраиваемое количество кубиков\n\n"
+            f"• 1–3 кубика на игрока\n\n"
             f"💰 <b>Финансы</b>\n"
             f"💵 Валюта: <b>USDT</b>\n"
             f"📈 Комиссия: <b>8%</b>\n"
             f"🔒 Эскроу-система\n\n"
             f"📝 <b>Примеры использования:</b>\n"
-            f"• <code>/duel 1 @username</code> - Вызов на дуэль\n"
-            f"• <code>/duel 1</code> (ответ на сообщение) - Вызов по ответу\n"
-            f"• <code>/knb 2 @username</code> - КНБ на 2 USDT\n"
-            f"• <code>/multiduel 2 4 3</code> - Мультиигра: 2 USDT, 4 игрока, 3 кубика\n\n"
-            f"💡 <i>Все игры проходят через эскроу-систему для вашей безопасности!</i>"
+            f"• <code>/duel 1 @username</code> — дуэль на 1 USDT\n"
+            f"• <code>/duel 1</code> (ответом) — дуэль по ответу\n"
+            f"• <code>/knb 2 @username</code> — КНБ на 2 USDT\n"
+            f"• <code>/multiduel 2 4 3</code> — 2 USDT, 4 игрока, 3 кубика\n\n"
+            f"💡 <i>Все игры проходят через эскроу-систему для вашей безопасности.</i>"
             )
         )
     
@@ -266,9 +270,10 @@ class MessageFormatter:
         return self.premiumize_text(
             (
             f"📋 <b>О боте — Illidan Games</b>\n\n"
+            f"💬 <i>«Честная игра — прежде всего.»</i>\n\n"
             f"🎯 <b>О проекте</b>\n"
-            f"Illidan Games — это платформа для честных игровых дуэлей на базе Telegram и CryptoBot.\n\n"
-            f"Мы предоставляем безопасную и прозрачную систему для игр между пользователями.\n\n"
+            f"Illidan Games — платформа для честных игровых дуэлей в Telegram с оплатой через CryptoBot.\n\n"
+            f"Наша цель — сделать игры между пользователями безопасными и прозрачными.\n\n"
             f"🔒 <b>Безопасность</b>\n"
             f"✅ Эскроу-система\n"
             f"✅ Автоматические выплаты\n"
@@ -277,8 +282,8 @@ class MessageFormatter:
             f"⚖️ <b>Важно</b>\n"
             f"Бот <b>не является</b> казино-проектом. Это инструмент для честных игр между пользователями.\n\n"
             f"📞 <b>Сотрудничество:</b>\n"
-            f"По вопросам сотрудничества обращайтесь в Техническую Поддержку.\n\n"
+            f"По вопросам сотрудничества обращайтесь в техническую поддержку.\n\n"
             f"💬 <b>Поддержка:</b>\n"
-            f"Все вопросы и предложения приветствуются!"
+            f"Будем рады вашим вопросам и предложениям."
             )
         )

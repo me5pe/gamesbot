@@ -60,6 +60,7 @@ class EscrowManager:
                 "amount": str(amount),
                 "description": description,
                 "hidden_message": f"Оплата участия в игре {game_id}",
+                "expires_in": 300,
                 "paid_btn_name": "callback",
                 "paid_btn_url": f"https://t.me/your_bot?start=game_{game_id}"
             }
